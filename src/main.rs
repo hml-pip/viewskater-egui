@@ -119,14 +119,15 @@ impl App {
         }
     }
 
-    fn navigate(&mut self, delta: isize, _ctx: &egui::Context) {
+    /// Try to navigate by `delta` images. Returns true if the display advanced.
+    fn navigate(&mut self, delta: isize) -> bool {
         if self.image_paths.is_empty() {
-            return;
+            return false;
         }
         let new_index = (self.current_index as isize + delta)
             .clamp(0, self.image_paths.len() as isize - 1) as usize;
         if new_index == self.current_index {
-            return;
+            return false;
         }
 
         if let Some(cache) = &mut self.cache {
@@ -145,10 +146,12 @@ impl App {
                 } else {
                     cache.navigate_backward(new_index, &self.image_paths);
                 }
+                return true;
             } else {
                 log::debug!("Cache miss at index {}, waiting for background load", new_index);
             }
         }
+        false
     }
 
     fn jump_to(&mut self, index: usize, ctx: &egui::Context) {
@@ -214,11 +217,17 @@ impl App {
         } else if end {
             self.jump_to(self.image_paths.len().saturating_sub(1), ctx);
         } else if nav_right_held {
-            self.navigate(1, ctx);
-            ctx.request_repaint();
+            let advanced = self.navigate(1);
+            // Keep repaint loop alive for cache misses (waiting for background
+            // thread), but stop at directory boundary to avoid phantom FPS.
+            if advanced || self.current_index < self.image_paths.len().saturating_sub(1) {
+                ctx.request_repaint();
+            }
         } else if nav_left_held {
-            self.navigate(-1, ctx);
-            ctx.request_repaint();
+            let advanced = self.navigate(-1);
+            if advanced || self.current_index > 0 {
+                ctx.request_repaint();
+            }
         }
     }
 
