@@ -1,9 +1,11 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use clap::Parser;
 use eframe::egui;
 
 mod file_io;
+mod perf;
 
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 100.0;
@@ -21,6 +23,8 @@ struct App {
     current_texture: Option<egui::TextureHandle>,
     zoom: f32,
     pan: egui::Vec2,
+
+    perf: perf::ImagePerfTracker,
 }
 
 impl App {
@@ -31,6 +35,7 @@ impl App {
             current_texture: None,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            perf: perf::ImagePerfTracker::new(),
         };
 
         if let Some(path) = path {
@@ -72,6 +77,7 @@ impl App {
             return;
         };
 
+        let start = Instant::now();
         match image::open(path) {
             Ok(img) => {
                 let rgba = img.to_rgba8();
@@ -83,11 +89,20 @@ impl App {
                     color_image,
                     egui::TextureOptions::LINEAR,
                 ));
-                log::debug!("Loaded: {} ({}x{})", path.display(), size[0], size[1]);
+                let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
+                self.perf.record_image_load(decode_ms);
+                log::debug!(
+                    "Loaded: {} ({}x{}) in {:.1}ms",
+                    path.display(),
+                    size[0],
+                    size[1],
+                    decode_ms
+                );
             }
             Err(e) => {
                 log::error!("Failed to load {}: {}", path.display(), e);
                 self.current_texture = None;
+                self.perf.last_decode_ms = None;
             }
         }
     }
@@ -269,6 +284,7 @@ impl App {
         ui.painter()
             .image(tex.id(), display_rect, uv, egui::Color32::WHITE);
     }
+
 }
 
 impl eframe::App for App {
@@ -278,6 +294,7 @@ impl eframe::App for App {
         self.update_title(ctx);
         self.show_bottom_panel(ctx);
         self.show_central_panel(ctx);
+        self.perf.show_overlay(ctx);
     }
 }
 
