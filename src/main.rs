@@ -170,6 +170,21 @@ impl PaneState {
         !self.image_paths.is_empty() && self.current_index > 0
     }
 
+    /// Check whether the next image in the given direction is cached and ready.
+    fn is_next_cached(&self, delta: isize) -> bool {
+        if self.image_paths.is_empty() {
+            return false;
+        }
+        let new_index = (self.current_index as isize + delta)
+            .clamp(0, self.image_paths.len() as isize - 1) as usize;
+        if new_index == self.current_index {
+            return true; // at boundary — nothing to advance to
+        }
+        self.cache
+            .as_ref()
+            .map_or(false, |c| c.current_texture_for(new_index).is_some())
+    }
+
     fn poll_cache(&mut self) {
         if let Some(cache) = &mut self.cache {
             cache.poll(&self.image_paths);
@@ -283,14 +298,33 @@ impl App {
     }
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
-        let (home, end, nav_right_held, nav_left_held) = ctx.input(|i| {
+        let (home, end, nav_right_held, nav_left_held, toggle_dual) = ctx.input(|i| {
             (
                 i.key_pressed(egui::Key::Home),
                 i.key_pressed(egui::Key::End),
                 i.key_down(egui::Key::ArrowRight) || i.key_down(egui::Key::D),
                 i.key_down(egui::Key::ArrowLeft) || i.key_down(egui::Key::A),
+                i.key_pressed(egui::Key::Tab),
             )
         });
+
+        if toggle_dual {
+            if self.panes.len() >= 2 {
+                // Dual → single: remove second pane
+                self.panes.truncate(1);
+            } else if !self.panes.is_empty() {
+                // Single → dual: clone pane 0's directory into a new pane
+                let mut pane = PaneState::new();
+                if !self.panes[0].image_paths.is_empty() {
+                    if let Some(dir) = self.panes[0].image_paths[0].parent() {
+                        pane.open_path(dir, ctx);
+                        pane.jump_to(self.panes[0].current_index, ctx);
+                    }
+                }
+                self.panes.push(pane);
+            }
+            return;
+        }
 
         if home {
             for pane in &mut self.panes {
@@ -304,21 +338,29 @@ impl App {
             }
             self.perf.record_image_load(0.0);
         } else if nav_right_held {
-            let any_advanced = self.panes.iter_mut().any(|p| p.navigate(1));
-            if any_advanced {
-                self.perf.record_image_load(0.0);
+            // Only advance if ALL panes have the next image cached (synced nav)
+            let all_ready = self.panes.iter().all(|p| p.is_next_cached(1));
+            if all_ready {
+                // fold instead of any() to avoid short-circuit — call navigate on every pane
+                let any_advanced = self.panes.iter_mut().fold(false, |acc, p| p.navigate(1) || acc);
+                if any_advanced {
+                    self.perf.record_image_load(0.0);
+                }
             }
             let any_can = self.panes.iter().any(|p| p.can_navigate_forward());
-            if any_advanced || any_can {
+            if any_can {
                 ctx.request_repaint();
             }
         } else if nav_left_held {
-            let any_advanced = self.panes.iter_mut().any(|p| p.navigate(-1));
-            if any_advanced {
-                self.perf.record_image_load(0.0);
+            let all_ready = self.panes.iter().all(|p| p.is_next_cached(-1));
+            if all_ready {
+                let any_advanced = self.panes.iter_mut().fold(false, |acc, p| p.navigate(-1) || acc);
+                if any_advanced {
+                    self.perf.record_image_load(0.0);
+                }
             }
             let any_can = self.panes.iter().any(|p| p.can_navigate_backward());
-            if any_advanced || any_can {
+            if any_can {
                 ctx.request_repaint();
             }
         }
@@ -395,6 +437,7 @@ impl App {
         });
 
         if let Some(idx) = slider_target {
+            let mut any_loaded = false;
             for pane in &mut self.panes {
                 let clamped = idx.min(pane.image_paths.len().saturating_sub(1));
                 if clamped != pane.current_index {
@@ -402,7 +445,11 @@ impl App {
                     pane.zoom = 1.0;
                     pane.pan = egui::Vec2::ZERO;
                     pane.load_sync(ctx);
+                    any_loaded = true;
                 }
+            }
+            if any_loaded {
+                self.perf.record_image_load(0.0);
             }
         }
 
