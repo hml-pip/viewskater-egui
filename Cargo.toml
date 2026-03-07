@@ -1,0 +1,27 @@
+[package]
+name = "viewskater-egui"
+version = "0.1.0"
+edition = "2021"
+description = "Fast image viewer built with egui"
+
+[dependencies]
+eframe = "0.31"
+egui = "0.31"
+image = { version = "0.25", default-features = false, features = [
+    "jpeg",
+    "png",
+    "bmp",
+    "webp",
+    "gif",
+    "tiff",
+    "qoi",
+    "tga",
+] }
+clap = { version = "4", features = ["derive"] }
+log = "0.4"
+env_logger = "0.11"
+natord = "1.0"
+
+[profile.opt-dev]
+inherits = "dev"
+opt-level = 1
