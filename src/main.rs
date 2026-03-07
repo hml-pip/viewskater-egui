@@ -4,6 +4,7 @@ use std::time::Instant;
 use clap::Parser;
 use eframe::egui;
 
+mod cache;
 mod file_io;
 mod perf;
 
@@ -24,6 +25,7 @@ struct App {
     zoom: f32,
     pan: egui::Vec2,
 
+    cache: Option<cache::SlidingWindowCache>,
     perf: perf::ImagePerfTracker,
 }
 
@@ -35,6 +37,7 @@ impl App {
             current_texture: None,
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
+            cache: None,
             perf: perf::ImagePerfTracker::new(),
         };
 
@@ -69,10 +72,19 @@ impl App {
 
         self.zoom = 1.0;
         self.pan = egui::Vec2::ZERO;
-        self.load_current(ctx);
+
+        let mut c = cache::SlidingWindowCache::new(ctx);
+        c.initialize(self.current_index, &self.image_paths);
+        self.current_texture = c.current_texture_for(self.current_index);
+        self.cache = Some(c);
+
+        if self.current_texture.is_some() {
+            self.perf.record_image_load(0.0);
+        }
     }
 
-    fn load_current(&mut self, ctx: &egui::Context) {
+    /// Synchronous decode fallback for cache misses.
+    fn load_sync(&mut self, ctx: &egui::Context) {
         let Some(path) = self.image_paths.get(self.current_index) else {
             return;
         };
@@ -92,7 +104,7 @@ impl App {
                 let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
                 self.perf.record_image_load(decode_ms);
                 log::debug!(
-                    "Loaded: {} ({}x{}) in {:.1}ms",
+                    "Sync fallback: {} ({}x{}) in {:.1}ms",
                     path.display(),
                     size[0],
                     size[1],
@@ -113,21 +125,53 @@ impl App {
         }
         let new_index = (self.current_index as isize + delta)
             .clamp(0, self.image_paths.len() as isize - 1) as usize;
-        if new_index != self.current_index {
-            self.current_index = new_index;
-            self.zoom = 1.0;
-            self.pan = egui::Vec2::ZERO;
-            self.load_current(ctx);
+        if new_index == self.current_index {
+            return;
+        }
+
+        self.current_index = new_index;
+        self.zoom = 1.0;
+        self.pan = egui::Vec2::ZERO;
+
+        if let Some(cache) = &mut self.cache {
+            let tex = if delta > 0 {
+                cache.navigate_forward(new_index, &self.image_paths)
+            } else {
+                cache.navigate_backward(new_index, &self.image_paths)
+            };
+
+            if let Some(t) = tex {
+                self.current_texture = Some(t);
+                self.perf.record_image_load(0.0); // Cache hit
+            } else {
+                log::debug!("Cache miss at index {}, falling back to sync decode", new_index);
+                self.load_sync(ctx);
+            }
+        } else {
+            self.load_sync(ctx);
         }
     }
 
     fn jump_to(&mut self, index: usize, ctx: &egui::Context) {
         let index = index.min(self.image_paths.len().saturating_sub(1));
-        if index != self.current_index {
-            self.current_index = index;
-            self.zoom = 1.0;
-            self.pan = egui::Vec2::ZERO;
-            self.load_current(ctx);
+        if index == self.current_index {
+            return;
+        }
+
+        self.current_index = index;
+        self.zoom = 1.0;
+        self.pan = egui::Vec2::ZERO;
+
+        if let Some(cache) = &mut self.cache {
+            cache.jump_to(index, &self.image_paths);
+            self.current_texture = cache.current_texture_for(index);
+            if self.current_texture.is_some() {
+                self.perf.record_image_load(0.0);
+            } else {
+                self.load_sync(ctx);
+            }
+        } else {
+            self.load_sync(ctx);
         }
     }
 
@@ -183,6 +227,8 @@ impl App {
         }
 
         let mut slider_target = None;
+        let mut slider_released = false;
+
         egui::TopBottomPanel::bottom("nav").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let mut idx = self.current_index;
@@ -193,6 +239,9 @@ impl App {
                 if response.changed() {
                     slider_target = Some(idx);
                 }
+                if response.drag_stopped() {
+                    slider_released = true;
+                }
                 ui.label(format!(
                     "{} / {}",
                     self.current_index + 1,
@@ -202,7 +251,24 @@ impl App {
         });
 
         if let Some(idx) = slider_target {
-            self.jump_to(idx, ctx);
+            let idx = idx.min(self.image_paths.len().saturating_sub(1));
+            if idx != self.current_index {
+                self.current_index = idx;
+                self.zoom = 1.0;
+                self.pan = egui::Vec2::ZERO;
+                // During drag: sync decode only, don't rebuild cache
+                self.load_sync(ctx);
+            }
+        }
+
+        if slider_released {
+            // Rebuild cache around the final slider position
+            if let Some(cache) = &mut self.cache {
+                cache.jump_to(self.current_index, &self.image_paths);
+                if let Some(t) = cache.current_texture_for(self.current_index) {
+                    self.current_texture = Some(t);
+                }
+            }
         }
     }
 
@@ -289,6 +355,11 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Poll background decode completions
+        if let Some(cache) = &mut self.cache {
+            cache.poll(&self.image_paths);
+        }
+
         self.handle_dropped_files(ctx);
         self.handle_keyboard(ctx);
         self.update_title(ctx);
