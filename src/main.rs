@@ -200,23 +200,25 @@ impl App {
     }
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
-        let (right, left, home, end) = ctx.input(|i| {
+        let (home, end, nav_right_held, nav_left_held) = ctx.input(|i| {
             (
-                i.key_pressed(egui::Key::ArrowRight),
-                i.key_pressed(egui::Key::ArrowLeft),
                 i.key_pressed(egui::Key::Home),
                 i.key_pressed(egui::Key::End),
+                i.key_down(egui::Key::ArrowRight) || i.key_down(egui::Key::D),
+                i.key_down(egui::Key::ArrowLeft) || i.key_down(egui::Key::A),
             )
         });
 
-        if right {
-            self.navigate(1, ctx);
-        } else if left {
-            self.navigate(-1, ctx);
-        } else if home {
+        if home {
             self.jump_to(0, ctx);
         } else if end {
             self.jump_to(self.image_paths.len().saturating_sub(1), ctx);
+        } else if nav_right_held {
+            self.navigate(1, ctx);
+            ctx.request_repaint();
+        } else if nav_left_held {
+            self.navigate(-1, ctx);
+            ctx.request_repaint();
         }
     }
 
