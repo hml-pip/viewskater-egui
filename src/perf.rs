@@ -20,11 +20,6 @@ impl ImagePerfTracker {
         }
     }
 
-    /// Clear the rolling FPS window (e.g. when navigation hits a boundary).
-    pub fn clear_timestamps(&mut self) {
-        self.image_timestamps.clear();
-    }
-
     /// Record that a new image was decoded and uploaded to the GPU.
     pub fn record_image_load(&mut self, decode_ms: f64) {
         self.last_decode_ms = Some(decode_ms);
@@ -47,9 +42,11 @@ impl ImagePerfTracker {
         if self.image_timestamps.len() < 2 {
             return 0.0;
         }
+        // Use (now - oldest) rather than (newest - oldest) so the denominator
+        // keeps growing after navigation stops, producing smooth decay instead
+        // of spiking when only a tight cluster of final timestamps remains.
         let oldest = *self.image_timestamps.front().unwrap();
-        let newest = *self.image_timestamps.back().unwrap();
-        let span = newest.duration_since(oldest).as_secs_f64();
+        let span = now.duration_since(oldest).as_secs_f64();
         if span > 0.0 {
             (self.image_timestamps.len() - 1) as f64 / span
         } else {
