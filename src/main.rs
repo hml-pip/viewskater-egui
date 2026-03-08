@@ -464,9 +464,25 @@ impl App {
         let mut slider_released = false;
 
         egui::TopBottomPanel::bottom("nav").show(ctx, |ui| {
+            let label_text = format!("{} / {}", current_idx + 1, max_images);
+
             ui.horizontal(|ui| {
                 let mut idx = current_idx;
                 let max = max_images - 1;
+
+                // Measure label width so slider can fill the rest
+                let label_galley = ui.fonts(|f| {
+                    f.layout_no_wrap(
+                        label_text.clone(),
+                        egui::FontId::default(),
+                        egui::Color32::WHITE,
+                    )
+                });
+                let label_width = label_galley.size().x + ui.spacing().item_spacing.x * 2.0;
+
+                // Override slider_width to fill available space minus label
+                ui.spacing_mut().slider_width = ui.available_width() - label_width;
+
                 let response =
                     ui.add(egui::Slider::new(&mut idx, 0..=max).show_value(false));
                 if response.changed() {
@@ -475,7 +491,7 @@ impl App {
                 if response.drag_stopped() {
                     slider_released = true;
                 }
-                ui.label(format!("{} / {}", current_idx + 1, max_images));
+                ui.label(label_text);
             });
         });
 
