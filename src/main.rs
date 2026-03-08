@@ -30,6 +30,7 @@ struct PaneState {
     pan: egui::Vec2,
     cache: Option<cache::SlidingWindowCache>,
     slider_loader: Option<cache::SliderLoader>,
+    decode_cache: cache::DecodeLruCache,
 }
 
 impl PaneState {
@@ -42,6 +43,7 @@ impl PaneState {
             pan: egui::Vec2::ZERO,
             cache: None,
             slider_loader: None,
+            decode_cache: cache::DecodeLruCache::new(),
         }
     }
 
@@ -81,12 +83,30 @@ impl PaneState {
     }
 
     /// Synchronous decode fallback for slider drag and jump.
+    /// Checks the LRU decode cache first to skip the ~90ms decode on revisits.
     /// Reuses the existing TextureHandle via `set()` when possible to
     /// avoid GPU texture allocation overhead on every call.
     fn load_sync(&mut self, ctx: &egui::Context) {
         let Some(path) = self.image_paths.get(self.current_index) else {
             return;
         };
+        let file_index = self.current_index;
+
+        // Check LRU decode cache first — skip decode on revisits
+        if let Some(cached_image) = self.decode_cache.get(file_index) {
+            let cached_image = cached_image.clone();
+            if let Some(tex) = &mut self.current_texture {
+                tex.set(cached_image, egui::TextureOptions::LINEAR);
+            } else {
+                self.current_texture = Some(ctx.load_texture(
+                    "slider_sync",
+                    cached_image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+            log::debug!("LRU cache hit for index {} — skipped decode", file_index);
+            return;
+        }
 
         let start = Instant::now();
         match image::open(path) {
@@ -95,6 +115,9 @@ impl PaneState {
                 let size = [rgba.width() as usize, rgba.height() as usize];
                 let pixels = rgba.into_raw();
                 let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+
+                // Store in LRU cache for future revisits
+                self.decode_cache.insert(file_index, color_image.clone());
 
                 if let Some(tex) = &mut self.current_texture {
                     // Reuse existing GPU texture — same TextureId, just replace pixels
@@ -110,11 +133,12 @@ impl PaneState {
 
                 let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
                 log::debug!(
-                    "Sync decode: {} ({}x{}) in {:.1}ms",
+                    "Sync decode: {} ({}x{}) in {:.1}ms [LRU size: {}]",
                     path.display(),
                     size[0],
                     size[1],
-                    decode_ms
+                    decode_ms,
+                    self.decode_cache.len(),
                 );
             }
             Err(e) => {

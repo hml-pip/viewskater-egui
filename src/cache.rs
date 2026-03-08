@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
@@ -400,6 +400,65 @@ impl SliderLoader {
     /// Reset on slider release.
     pub fn cancel(&mut self) {
         // nothing to clean up
+    }
+}
+
+/// LRU cache of decoded images, keyed by file index.
+///
+/// Stores decoded `ColorImage` in CPU memory so that revisiting an image
+/// during slider scrubbing skips the ~90ms decode. This is the egui
+/// equivalent of iced's raster cache where `Memory::Device(entry)` returns
+/// instantly for previously-loaded images.
+///
+/// Memory budget: a 4K RGBA8 image is ~32MB. With capacity 50 that's ~1.6GB
+/// worst case. For 1080p images (~8MB each), 50 images = ~400MB.
+pub struct DecodeLruCache {
+    /// Map from file_index → decoded ColorImage
+    entries: HashMap<usize, egui::ColorImage>,
+    /// Access order for LRU eviction — most recently used at the back
+    order: VecDeque<usize>,
+    capacity: usize,
+}
+
+const LRU_CAPACITY: usize = 50;
+
+impl DecodeLruCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            capacity: LRU_CAPACITY,
+        }
+    }
+
+    /// Get a decoded image if cached. Moves entry to most-recently-used.
+    pub fn get(&mut self, file_index: usize) -> Option<&egui::ColorImage> {
+        if self.entries.contains_key(&file_index) {
+            // Move to back (most recently used)
+            self.order.retain(|&i| i != file_index);
+            self.order.push_back(file_index);
+            self.entries.get(&file_index)
+        } else {
+            None
+        }
+    }
+
+    /// Insert a decoded image. Evicts the least recently used if at capacity.
+    pub fn insert(&mut self, file_index: usize, image: egui::ColorImage) {
+        if self.entries.contains_key(&file_index) {
+            self.order.retain(|&i| i != file_index);
+        } else if self.entries.len() >= self.capacity {
+            // Evict LRU (front of order)
+            if let Some(evicted) = self.order.pop_front() {
+                self.entries.remove(&evicted);
+            }
+        }
+        self.entries.insert(file_index, image);
+        self.order.push_back(file_index);
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 }
 
