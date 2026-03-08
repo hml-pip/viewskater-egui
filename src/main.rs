@@ -81,6 +81,8 @@ impl PaneState {
     }
 
     /// Synchronous decode fallback for slider drag and jump.
+    /// Reuses the existing TextureHandle via `set()` when possible to
+    /// avoid GPU texture allocation overhead on every call.
     fn load_sync(&mut self, ctx: &egui::Context) {
         let Some(path) = self.image_paths.get(self.current_index) else {
             return;
@@ -93,14 +95,22 @@ impl PaneState {
                 let size = [rgba.width() as usize, rgba.height() as usize];
                 let pixels = rgba.into_raw();
                 let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
-                self.current_texture = Some(ctx.load_texture(
-                    path.file_name().unwrap_or_default().to_string_lossy(),
-                    color_image,
-                    egui::TextureOptions::LINEAR,
-                ));
+
+                if let Some(tex) = &mut self.current_texture {
+                    // Reuse existing GPU texture — same TextureId, just replace pixels
+                    tex.set(color_image, egui::TextureOptions::LINEAR);
+                } else {
+                    // First load — allocate a new texture
+                    self.current_texture = Some(ctx.load_texture(
+                        "slider_sync",
+                        color_image,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
+
                 let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
                 log::debug!(
-                    "Sync fallback: {} ({}x{}) in {:.1}ms",
+                    "Sync decode: {} ({}x{}) in {:.1}ms",
                     path.display(),
                     size[0],
                     size[1],
