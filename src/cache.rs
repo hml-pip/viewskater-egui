@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Instant;
 
@@ -14,6 +14,7 @@ const COL_EMPTY: egui::Color32 = egui::Color32::from_rgb(60, 60, 60);
 pub struct DecodeResult {
     pub file_index: usize,
     pub image: Option<egui::ColorImage>,
+    #[allow(dead_code)]
     pub decode_ms: f64,
 }
 
@@ -196,13 +197,13 @@ impl SlidingWindowCache {
     }
 
     /// Spawn a background thread to decode an image.
-    fn spawn_load(&mut self, file_index: usize, path: &PathBuf) {
+    fn spawn_load(&mut self, file_index: usize, path: &Path) {
         if self.in_flight.contains(&file_index) {
             return;
         }
         self.in_flight.insert(file_index);
 
-        let path = path.clone();
+        let path = path.to_path_buf();
         let tx = self.tx.clone();
         let ctx = self.ctx.clone();
 
@@ -210,7 +211,7 @@ impl SlidingWindowCache {
             let start = Instant::now();
             let image = match image::open(&path) {
                 Ok(img) => {
-                    Some(crate::image_to_color_image(img))
+                    Some(crate::decode::image_to_color_image(img))
                 }
                 Err(e) => {
                     log::warn!("Background decode failed for {}: {}", path.display(), e);
@@ -275,7 +276,7 @@ impl SlidingWindowCache {
                 for i in 0..cache_size {
                     let file_index = self.first_file_index + i;
                     let is_current = file_index == current_index;
-                    let is_loaded = self.slots.get(i).map_or(false, |s| s.is_some());
+                    let is_loaded = self.slots.get(i).is_some_and(|s| s.is_some());
                     let is_in_flight = self.in_flight.contains(&file_index);
                     let is_valid = file_index < num_files;
 
@@ -336,10 +337,10 @@ impl SlidingWindowCache {
     }
 
     /// Synchronously decode an image and upload as a texture.
-    fn decode_sync(path: &PathBuf, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    fn decode_sync(path: &Path, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         match image::open(path) {
             Ok(img) => {
-                let color_image = crate::image_to_color_image(img);
+                let color_image = crate::decode::image_to_color_image(img);
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
