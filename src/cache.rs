@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
@@ -210,10 +210,7 @@ impl SlidingWindowCache {
             let start = Instant::now();
             let image = match image::open(&path) {
                 Ok(img) => {
-                    let rgba = img.to_rgba8();
-                    let size = [rgba.width() as usize, rgba.height() as usize];
-                    let pixels = rgba.into_raw();
-                    Some(egui::ColorImage::from_rgba_unmultiplied(size, &pixels))
+                    Some(crate::image_to_color_image(img))
                 }
                 Err(e) => {
                     log::warn!("Background decode failed for {}: {}", path.display(), e);
@@ -342,10 +339,7 @@ impl SlidingWindowCache {
     fn decode_sync(path: &PathBuf, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         match image::open(path) {
             Ok(img) => {
-                let rgba = img.to_rgba8();
-                let size = [rgba.width() as usize, rgba.height() as usize];
-                let pixels = rgba.into_raw();
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                let color_image = crate::image_to_color_image(img);
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -357,6 +351,113 @@ impl SlidingWindowCache {
                 None
             }
         }
+    }
+}
+
+/// Throttled synchronous slider loader.
+///
+/// Reproduces the iced viewskater's slider pattern adapted for egui:
+/// In iced, async tasks just wrap raw bytes into Handles (~5ms), and iced's
+/// engine lazily decodes only the latest Handle during its prepare phase —
+/// so only one decode per render frame actually happens. Since egui has no
+/// deferred decode pipeline, we achieve the equivalent by doing sync decode
+/// of the latest slider position, throttled to limit how often we block.
+pub struct SliderLoader {
+    last_load: Instant,
+}
+
+const SLIDER_THROTTLE_MS: u128 = 10;
+
+impl SliderLoader {
+    pub fn new(_ctx: &egui::Context) -> Self {
+        Self {
+            last_load: Instant::now(),
+        }
+    }
+
+    /// Returns true if enough time has passed since the last decode.
+    pub fn should_load(&mut self) -> bool {
+        let now = Instant::now();
+        let elapsed = now
+            .checked_duration_since(self.last_load)
+            .map(|d| d.as_millis())
+            .unwrap_or(SLIDER_THROTTLE_MS);
+
+        if elapsed >= SLIDER_THROTTLE_MS {
+            self.last_load = now;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Reset on slider release.
+    pub fn cancel(&mut self) {
+        // nothing to clean up
+    }
+}
+
+/// LRU cache of decoded images, keyed by file index.
+///
+/// Stores decoded `ColorImage` in CPU memory so that revisiting an image
+/// during slider scrubbing skips the ~90ms decode. This is the egui
+/// equivalent of iced's raster cache where `Memory::Device(entry)` returns
+/// instantly for previously-loaded images.
+///
+/// Memory budget: a 4K RGBA8 image is ~32MB. With capacity 50 that's ~1.6GB
+/// worst case. For 1080p images (~8MB each), 50 images = ~400MB.
+pub struct DecodeLruCache {
+    /// Map from file_index → decoded ColorImage
+    entries: HashMap<usize, egui::ColorImage>,
+    /// Access order for LRU eviction — most recently used at the back
+    order: VecDeque<usize>,
+    capacity: usize,
+}
+
+const LRU_CAPACITY: usize = 50;
+
+impl DecodeLruCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            capacity: LRU_CAPACITY,
+        }
+    }
+
+    /// Get a decoded image if cached. Moves entry to most-recently-used.
+    pub fn get(&mut self, file_index: usize) -> Option<&egui::ColorImage> {
+        if self.entries.contains_key(&file_index) {
+            // Move to back (most recently used)
+            self.order.retain(|&i| i != file_index);
+            self.order.push_back(file_index);
+            self.entries.get(&file_index)
+        } else {
+            None
+        }
+    }
+
+    /// Insert a decoded image. Evicts the least recently used if at capacity.
+    pub fn insert(&mut self, file_index: usize, image: egui::ColorImage) {
+        if self.entries.contains_key(&file_index) {
+            self.order.retain(|&i| i != file_index);
+        } else if self.entries.len() >= self.capacity {
+            // Evict LRU (front of order)
+            if let Some(evicted) = self.order.pop_front() {
+                self.entries.remove(&evicted);
+            }
+        }
+        self.entries.insert(file_index, image);
+        self.order.push_back(file_index);
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.order.clear();
     }
 }
 

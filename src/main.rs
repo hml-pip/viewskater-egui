@@ -11,6 +11,49 @@ mod perf;
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 100.0;
 
+/// Convert a DynamicImage directly to egui's ColorImage, bypassing both
+/// image crate v0.25's slow CICP color space conversion and egui's
+/// per-pixel `from_rgba_unmultiplied` conversion. Goes straight from
+/// decoded pixel data to `Vec<Color32>`.
+fn image_to_color_image(img: image::DynamicImage) -> egui::ColorImage {
+    use image::DynamicImage;
+    match img {
+        DynamicImage::ImageRgb8(buf) => {
+            let w = buf.width() as usize;
+            let h = buf.height() as usize;
+            let rgb = buf.into_raw();
+            let pixels: Vec<egui::Color32> = rgb
+                .chunks_exact(3)
+                .map(|c| egui::Color32::from_rgb(c[0], c[1], c[2]))
+                .collect();
+            egui::ColorImage {
+                size: [w, h],
+                pixels,
+            }
+        }
+        DynamicImage::ImageRgba8(buf) => {
+            let w = buf.width() as usize;
+            let h = buf.height() as usize;
+            let rgba = buf.into_raw();
+            let pixels: Vec<egui::Color32> = rgba
+                .chunks_exact(4)
+                .map(|c| egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]))
+                .collect();
+            egui::ColorImage {
+                size: [w, h],
+                pixels,
+            }
+        }
+        other => {
+            let rgba = other.into_rgba8();
+            let w = rgba.width() as usize;
+            let h = rgba.height() as usize;
+            let pixels = rgba.into_raw();
+            egui::ColorImage::from_rgba_unmultiplied([w, h], &pixels)
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(name = "viewskater-egui", about = "Fast image viewer")]
 struct Args {
@@ -29,6 +72,8 @@ struct PaneState {
     zoom: f32,
     pan: egui::Vec2,
     cache: Option<cache::SlidingWindowCache>,
+    slider_loader: Option<cache::SliderLoader>,
+    decode_cache: cache::DecodeLruCache,
 }
 
 impl PaneState {
@@ -40,6 +85,8 @@ impl PaneState {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             cache: None,
+            slider_loader: None,
+            decode_cache: cache::DecodeLruCache::new(),
         }
     }
 
@@ -70,38 +117,82 @@ impl PaneState {
 
         self.zoom = 1.0;
         self.pan = egui::Vec2::ZERO;
+        self.decode_cache.clear();
 
         let mut c = cache::SlidingWindowCache::new(ctx);
         c.initialize(self.current_index, &self.image_paths);
         self.current_texture = c.current_texture_for(self.current_index);
         self.cache = Some(c);
+        self.slider_loader = Some(cache::SliderLoader::new(ctx));
     }
 
     /// Synchronous decode fallback for slider drag and jump.
+    /// Checks the LRU decode cache first to skip the ~90ms decode on revisits.
+    /// Reuses the existing TextureHandle via `set()` when possible to
+    /// avoid GPU texture allocation overhead on every call.
     fn load_sync(&mut self, ctx: &egui::Context) {
         let Some(path) = self.image_paths.get(self.current_index) else {
             return;
         };
+        let file_index = self.current_index;
 
-        let start = Instant::now();
-        match image::open(path) {
-            Ok(img) => {
-                let rgba = img.to_rgba8();
-                let size = [rgba.width() as usize, rgba.height() as usize];
-                let pixels = rgba.into_raw();
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+        // Check LRU decode cache first — skip decode on revisits
+        if let Some(cached_image) = self.decode_cache.get(file_index) {
+            let t0 = Instant::now();
+            let cached_image = cached_image.clone();
+            let clone_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+            let t1 = Instant::now();
+            if let Some(tex) = &mut self.current_texture {
+                tex.set(cached_image, egui::TextureOptions::LINEAR);
+            } else {
                 self.current_texture = Some(ctx.load_texture(
-                    path.file_name().unwrap_or_default().to_string_lossy(),
-                    color_image,
+                    "slider_sync",
+                    cached_image,
                     egui::TextureOptions::LINEAR,
                 ));
-                let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
+            }
+            let upload_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+            log::debug!(
+                "LRU hit [{}]: clone={:.1}ms upload={:.1}ms",
+                file_index, clone_ms, upload_ms,
+            );
+            return;
+        }
+
+        let t0 = Instant::now();
+        match image::open(path) {
+            Ok(img) => {
+                let decode_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+                let t1 = Instant::now();
+                let color_image = image_to_color_image(img);
+                let convert_ms = t1.elapsed().as_secs_f64() * 1000.0;
+
+                let t2 = Instant::now();
+                self.decode_cache.insert(file_index, color_image.clone());
+                let cache_ms = t2.elapsed().as_secs_f64() * 1000.0;
+
+                let size = color_image.size;
+                let t3 = Instant::now();
+                if let Some(tex) = &mut self.current_texture {
+                    tex.set(color_image, egui::TextureOptions::LINEAR);
+                } else {
+                    self.current_texture = Some(ctx.load_texture(
+                        "slider_sync",
+                        color_image,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
+                let upload_ms = t3.elapsed().as_secs_f64() * 1000.0;
+
                 log::debug!(
-                    "Sync fallback: {} ({}x{}) in {:.1}ms",
-                    path.display(),
-                    size[0],
-                    size[1],
-                    decode_ms
+                    "load_sync [{}] ({}x{}): decode={:.1}ms convert={:.1}ms cache={:.1}ms upload={:.1}ms total={:.1}ms [LRU: {}]",
+                    file_index, size[0], size[1],
+                    decode_ms, convert_ms, cache_ms, upload_ms,
+                    t0.elapsed().as_secs_f64() * 1000.0,
+                    self.decode_cache.len(),
                 );
             }
             Err(e) => {
@@ -190,6 +281,7 @@ impl PaneState {
             cache.poll(&self.image_paths);
         }
     }
+
 
     fn show_content(&mut self, ui: &mut egui::Ui) {
         let tex = self.current_texture.clone();
@@ -450,9 +542,25 @@ impl App {
         let mut slider_released = false;
 
         egui::TopBottomPanel::bottom("nav").show(ctx, |ui| {
+            let label_text = format!("{} / {}", current_idx + 1, max_images);
+
             ui.horizontal(|ui| {
                 let mut idx = current_idx;
                 let max = max_images - 1;
+
+                // Measure label width so slider can fill the rest
+                let label_galley = ui.fonts(|f| {
+                    f.layout_no_wrap(
+                        label_text.clone(),
+                        egui::FontId::default(),
+                        egui::Color32::WHITE,
+                    )
+                });
+                let label_width = label_galley.size().x + ui.spacing().item_spacing.x * 2.0;
+
+                // Override slider_width to fill available space minus label
+                ui.spacing_mut().slider_width = ui.available_width() - label_width;
+
                 let response =
                     ui.add(egui::Slider::new(&mut idx, 0..=max).show_value(false));
                 if response.changed() {
@@ -461,29 +569,45 @@ impl App {
                 if response.drag_stopped() {
                     slider_released = true;
                 }
-                ui.label(format!("{} / {}", current_idx + 1, max_images));
+                ui.label(label_text);
             });
         });
 
         if let Some(idx) = slider_target {
-            let mut any_loaded = false;
             for pane in &mut self.panes {
                 let clamped = idx.min(pane.image_paths.len().saturating_sub(1));
                 if clamped != pane.current_index {
                     pane.current_index = clamped;
                     pane.zoom = 1.0;
                     pane.pan = egui::Vec2::ZERO;
-                    pane.load_sync(ctx);
-                    any_loaded = true;
+
+                    // Try the sliding window cache first (free if already cached)
+                    let found_in_cache = pane
+                        .cache
+                        .as_ref()
+                        .and_then(|c| c.current_texture_for(clamped));
+
+                    if let Some(tex) = found_in_cache {
+                        pane.current_texture = Some(tex);
+                        self.perf.record_image_load(0.0);
+                    } else if let Some(loader) = &mut pane.slider_loader {
+                        // Throttled sync decode — like iced, only decode when
+                        // enough time has passed. Previous texture stays on screen.
+                        if loader.should_load() {
+                            pane.load_sync(ctx);
+                            self.perf.record_image_load(0.0);
+                        }
+                    }
                 }
             }
-            if any_loaded {
-                self.perf.record_image_load(0.0);
-            }
+            ctx.request_repaint();
         }
 
         if slider_released {
             for pane in &mut self.panes {
+                if let Some(loader) = &mut pane.slider_loader {
+                    loader.cancel();
+                }
                 if let Some(cache) = &mut pane.cache {
                     cache.jump_to(pane.current_index, &pane.image_paths);
                     if let Some(t) = cache.current_texture_for(pane.current_index) {
