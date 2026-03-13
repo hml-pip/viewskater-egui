@@ -6,6 +6,86 @@ use serde::{Deserialize, Serialize};
 use crate::menu::toggle_switch;
 use crate::theme::UiTheme;
 
+/// Custom slider with accent-colored handle and two-tone rail.
+///
+/// egui's built-in Slider ties the idle handle color to the rail
+/// background (`widgets.inactive.bg_fill`), making it impossible to
+/// theme them independently.  This draws everything from scratch.
+fn accent_slider(
+    ui: &mut egui::Ui,
+    value: &mut usize,
+    range: std::ops::RangeInclusive<usize>,
+    theme: &UiTheme,
+) {
+    let lo = *range.start();
+    let hi = *range.end();
+
+    let slider_width = ui.spacing().slider_width;
+    let thickness = ui
+        .text_style_height(&egui::TextStyle::Body)
+        .max(ui.spacing().interact_size.y);
+
+    // Allocate rail + handle area, then value text to the right.
+    let desired = egui::vec2(slider_width, thickness);
+    let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::drag());
+
+    // Handle dragging.
+    if let Some(pos) = response.interact_pointer_pos() {
+        let handle_radius = rect.height() / 2.5;
+        let usable = rect.x_range().shrink(handle_radius);
+        let t = ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
+        *value = lo + ((hi - lo) as f64 * t as f64).round() as usize;
+    }
+
+    // Paint.
+    let handle_radius = rect.height() / 2.5;
+    let rail_radius = 4.0_f32;
+    let cy = rect.center().y;
+    let rail = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), cy - rail_radius),
+        egui::pos2(rect.right(), cy + rail_radius),
+    );
+
+    let t = if hi > lo {
+        (*value - lo) as f32 / (hi - lo) as f32
+    } else {
+        0.0
+    };
+    let handle_x = egui::lerp(
+        (rect.left() + handle_radius)..=(rect.right() - handle_radius),
+        t,
+    );
+
+    // Unfilled rail (full width, painted first).
+    ui.painter()
+        .rect_filled(rail, rail_radius, egui::Color32::from_gray(60));
+    // Filled rail (left edge → handle center).
+    let filled = egui::Rect::from_min_max(rail.min, egui::pos2(handle_x, rail.max.y));
+    ui.painter().rect_filled(filled, rail_radius, theme.accent);
+    // Handle circle.
+    let center = egui::pos2(handle_x, cy);
+    ui.painter().circle(
+        center,
+        handle_radius,
+        theme.accent,
+        egui::Stroke::new(1.0, egui::Color32::from_gray(255)),
+    );
+
+    // Value text to the right.
+    let text_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.right() + ui.spacing().item_spacing.x, rect.top()),
+        egui::vec2(40.0, rect.height()),
+    );
+    ui.put(
+        text_rect,
+        egui::Label::new(
+            egui::RichText::new(format!("{value}"))
+                .monospace()
+                .color(egui::Color32::from_gray(200)),
+        ),
+    );
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -150,11 +230,11 @@ pub fn show_settings_modal(
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.label("Cache Size");
-                                ui.add(egui::Slider::new(&mut settings.cache_count, 1..=20));
+                                accent_slider(ui, &mut settings.cache_count, 1..=20, theme);
                             });
                             ui.horizontal(|ui| {
                                 ui.label("LRU Capacity");
-                                ui.add(egui::Slider::new(&mut settings.lru_capacity, 10..=200));
+                                accent_slider(ui, &mut settings.lru_capacity, 10..=200, theme);
                             });
                         });
                 });

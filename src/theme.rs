@@ -31,7 +31,7 @@ impl UiTheme {
     /// Teal dark theme matching the iced ViewSkater version.
     pub fn teal_dark() -> Self {
         Self {
-            accent: egui::Color32::from_rgb(20, 148, 163),
+            accent: egui::Color32::from_rgb(26, 189, 208),
             backdrop: egui::Color32::from_black_alpha(204),
             card_bg: egui::Color32::from_gray(40),
             card_stroke: egui::Color32::from_gray(80),

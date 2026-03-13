@@ -319,17 +319,56 @@ impl App {
                 });
                 let label_width = label_galley.size().x + ui.spacing().item_spacing.x * 2.0;
 
-                // Override slider_width to fill available space minus label
-                ui.spacing_mut().slider_width = ui.available_width() - label_width;
+                // Custom slider: accent handle + two-tone rail
+                let slider_width = ui.available_width() - label_width;
+                let thickness = ui
+                    .text_style_height(&egui::TextStyle::Body)
+                    .max(ui.spacing().interact_size.y);
+                let (rect, response) =
+                    ui.allocate_exact_size(egui::vec2(slider_width, thickness), egui::Sense::drag());
 
-                let response =
-                    ui.add(egui::Slider::new(&mut idx, 0..=max).show_value(false));
-                if response.changed() {
-                    slider_target = Some(idx);
+                let handle_radius = rect.height() / 2.5;
+                let rail_radius = 4.0_f32;
+                let cy = rect.center().y;
+                let handle_range =
+                    (rect.left() + handle_radius)..=(rect.right() - handle_radius);
+
+                // Handle dragging
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let usable = rect.x_range().shrink(handle_radius);
+                    let drag_t =
+                        ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
+                    idx = (max as f32 * drag_t).round() as usize;
+                    if idx != current_idx {
+                        slider_target = Some(idx);
+                    }
                 }
                 if response.drag_stopped() {
                     slider_released = true;
                 }
+
+                // Paint: unfilled rail → filled rail → handle (back to front)
+                let rail = egui::Rect::from_min_max(
+                    egui::pos2(rect.left(), cy - rail_radius),
+                    egui::pos2(rect.right(), cy + rail_radius),
+                );
+                // Recompute handle_x after potential drag update
+                let t = if max > 0 { idx as f32 / max as f32 } else { 0.0 };
+                let handle_x = egui::lerp(handle_range, t);
+
+                ui.painter()
+                    .rect_filled(rail, rail_radius, egui::Color32::from_gray(60));
+                let filled =
+                    egui::Rect::from_min_max(rail.min, egui::pos2(handle_x, rail.max.y));
+                ui.painter()
+                    .rect_filled(filled, rail_radius, self.theme.accent);
+                ui.painter().circle(
+                    egui::pos2(handle_x, cy),
+                    handle_radius,
+                    self.theme.accent,
+                    egui::Stroke::new(1.0, egui::Color32::from_gray(255)),
+                );
+
                 ui.label(label_text);
             });
         });
