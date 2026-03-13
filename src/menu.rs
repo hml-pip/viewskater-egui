@@ -71,7 +71,7 @@ fn hover_row(
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
     let bg_idx = ui.painter().add(egui::Shape::Noop);
-    let row = ui.horizontal(|ui| {
+    let row = ui.scope(|ui| {
         add_contents(ui);
     });
     let highlight = egui::Rect::from_min_size(
@@ -190,13 +190,24 @@ pub fn show_menu_bar(
                 });
                 ui.separator();
                 hover_row(ui, "footer", theme, ml, mw, |ui| {
-                    toggle_switch(ui, &mut settings.show_footer, "Footer  Tab", theme);
+                    ui.horizontal(|ui| {
+                        toggle_switch(ui, &mut settings.show_footer, "Footer  Tab", theme);
+                    });
                 });
                 hover_row(ui, "fps", theme, ml, mw, |ui| {
-                    toggle_switch(ui, &mut settings.show_fps, "FPS Overlay", theme);
+                    ui.horizontal(|ui| {
+                        toggle_switch(ui, &mut settings.show_fps, "FPS Overlay", theme);
+                    });
                 });
                 hover_row(ui, "cache", theme, ml, mw, |ui| {
-                    toggle_switch(ui, &mut settings.show_cache_overlay, "Cache Overlay", theme);
+                    ui.horizontal(|ui| {
+                        toggle_switch(
+                            ui,
+                            &mut settings.show_cache_overlay,
+                            "Cache Overlay",
+                            theme,
+                        );
+                    });
                 });
             });
 
