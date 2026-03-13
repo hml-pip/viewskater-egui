@@ -10,7 +10,7 @@ use crate::file_io;
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 100.0;
 
-pub struct PaneState {
+pub struct Pane {
     pub image_paths: Vec<PathBuf>,
     pub current_index: usize,
     pub current_texture: Option<egui::TextureHandle>,
@@ -21,7 +21,7 @@ pub struct PaneState {
     pub decode_cache: cache::DecodeLruCache,
 }
 
-impl PaneState {
+impl Pane {
     pub fn new() -> Self {
         Self {
             image_paths: Vec::new(),
@@ -33,6 +33,17 @@ impl PaneState {
             slider_loader: None,
             decode_cache: cache::DecodeLruCache::new(),
         }
+    }
+
+    pub fn close(&mut self) {
+        self.image_paths.clear();
+        self.current_index = 0;
+        self.current_texture = None;
+        self.zoom = 1.0;
+        self.pan = egui::Vec2::ZERO;
+        self.cache = None;
+        self.slider_loader = None;
+        self.decode_cache.clear();
     }
 
     pub fn open_path(&mut self, path: &std::path::Path, ctx: &egui::Context) {

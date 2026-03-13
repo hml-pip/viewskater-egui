@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
+use crate::menu::{self, MenuAction};
 use crate::pane::Pane;
 use crate::perf;
 
@@ -9,6 +10,9 @@ pub struct App {
     panes: Vec<Pane>,
     perf: perf::ImagePerfTracker,
     divider_fraction: f32,
+    show_footer: bool,
+    show_fps: bool,
+    show_cache_overlay: bool,
 }
 
 impl App {
@@ -17,6 +21,9 @@ impl App {
             panes: vec![Pane::new()],
             perf: perf::ImagePerfTracker::new(),
             divider_fraction: 0.5,
+            show_footer: true,
+            show_fps: true,
+            show_cache_overlay: true,
         };
 
         if !paths.is_empty() {
@@ -35,9 +42,67 @@ impl App {
         app
     }
 
+    fn set_single_pane(&mut self) {
+        if self.panes.len() >= 2 {
+            self.panes.truncate(1);
+        }
+    }
+
+    fn set_dual_pane(&mut self, ctx: &egui::Context) {
+        if self.panes.len() < 2 {
+            let mut pane = Pane::new();
+            if !self.panes[0].image_paths.is_empty() {
+                if let Some(dir) = self.panes[0].image_paths[0].parent() {
+                    pane.open_path(dir, ctx);
+                    pane.jump_to(self.panes[0].current_index, ctx);
+                }
+            }
+            self.panes.push(pane);
+        }
+    }
+
+    fn open_folder_dialog(&mut self, pane_idx: usize, ctx: &egui::Context) {
+        if let Some(pane) = self.panes.get_mut(pane_idx) {
+            if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                pane.open_path(&dir, ctx);
+            }
+        }
+    }
+
+    fn open_file_dialog(&mut self, pane_idx: usize, ctx: &egui::Context) {
+        if let Some(pane) = self.panes.get_mut(pane_idx) {
+            if let Some(file) = rfd::FileDialog::new()
+                .add_filter("Images", &["jpg", "jpeg", "png", "bmp", "webp", "gif", "tiff", "tif", "qoi", "tga"])
+                .pick_file()
+            {
+                pane.open_path(&file, ctx);
+            }
+        }
+    }
+
+    fn close_images(&mut self) {
+        for pane in &mut self.panes {
+            pane.close();
+        }
+    }
+
+    fn handle_menu_action(&mut self, action: MenuAction, ctx: &egui::Context) {
+        match action {
+            MenuAction::None => {}
+            MenuAction::OpenFolder(idx) => self.open_folder_dialog(idx, ctx),
+            MenuAction::OpenFile(idx) => self.open_file_dialog(idx, ctx),
+            MenuAction::Close => self.close_images(),
+            MenuAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            MenuAction::SetSinglePane => self.set_single_pane(),
+            MenuAction::SetDualPane => self.set_dual_pane(ctx),
+            MenuAction::ShowAbout => {} // TODO
+        }
+    }
+
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let (home, end, shift, nav_right_pressed, nav_left_pressed,
-             nav_right_held, nav_left_held, toggle_dual, set_single, set_dual) =
+             nav_right_held, nav_left_held, toggle_dual, set_single, set_dual,
+             toggle_footer, open_folder, open_file, close, quit) =
             ctx.input(|i| {
                 (
                     i.key_pressed(egui::Key::Home),
@@ -50,8 +115,34 @@ impl App {
                     i.key_pressed(egui::Key::Tab),
                     i.key_pressed(egui::Key::Num1) && i.modifiers.command,
                     i.key_pressed(egui::Key::Num2) && i.modifiers.command,
+                    i.key_pressed(egui::Key::Tab),
+                    i.key_pressed(egui::Key::O) && i.modifiers.command && i.modifiers.shift,
+                    i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift,
+                    i.key_pressed(egui::Key::W) && i.modifiers.command,
+                    i.key_pressed(egui::Key::Q) && i.modifiers.command,
                 )
             });
+
+        if quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if open_folder {
+            self.open_folder_dialog(0, ctx);
+            return;
+        }
+        if open_file {
+            self.open_file_dialog(0, ctx);
+            return;
+        }
+        if close {
+            self.close_images();
+            return;
+        }
+        if toggle_footer {
+            self.show_footer = !self.show_footer;
+            return;
+        }
 
         // Skate mode (Shift held): advance every frame while key is down
         // Normal mode: advance once per key press/repeat event (~30hz)
@@ -59,33 +150,19 @@ impl App {
         let nav_left = if shift { nav_left_held } else { nav_left_pressed };
 
         if set_single && self.panes.len() >= 2 {
-            self.panes.truncate(1);
+            self.set_single_pane();
             return;
         }
         if set_dual && self.panes.len() == 1 {
-            let mut pane = Pane::new();
-            if !self.panes[0].image_paths.is_empty() {
-                if let Some(dir) = self.panes[0].image_paths[0].parent() {
-                    pane.open_path(dir, ctx);
-                    pane.jump_to(self.panes[0].current_index, ctx);
-                }
-            }
-            self.panes.push(pane);
+            self.set_dual_pane(ctx);
             return;
         }
 
         if toggle_dual {
             if self.panes.len() >= 2 {
-                self.panes.truncate(1);
+                self.set_single_pane();
             } else if !self.panes.is_empty() {
-                let mut pane = Pane::new();
-                if !self.panes[0].image_paths.is_empty() {
-                    if let Some(dir) = self.panes[0].image_paths[0].parent() {
-                        pane.open_path(dir, ctx);
-                        pane.jump_to(self.panes[0].current_index, ctx);
-                    }
-                }
-                self.panes.push(pane);
+                self.set_dual_pane(ctx);
             }
             return;
         }
@@ -179,7 +256,7 @@ impl App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 
-    fn show_bottom_panel(&mut self, ctx: &egui::Context) {
+    fn show_slider_panel(&mut self, ctx: &egui::Context) {
         let max_images = self
             .panes
             .iter()
@@ -359,13 +436,32 @@ impl eframe::App for App {
         self.handle_dropped_files(ctx);
         self.handle_keyboard(ctx);
         self.update_title(ctx);
-        self.show_bottom_panel(ctx);
-        self.show_central_panel(ctx);
-        self.perf.show_overlay(ctx);
 
-        if let Some(pane) = self.panes.first() {
-            if let Some(cache) = &pane.cache {
-                cache.show_debug_overlay(ctx, pane.current_index, pane.image_paths.len());
+        // Menu bar (top)
+        let action = menu::show_menu_bar(ctx, &self.panes, &mut self.show_footer, &mut self.show_fps, &mut self.show_cache_overlay);
+        self.handle_menu_action(action, ctx);
+
+        // Footer (bottom, before slider so it's below the slider)
+        if self.show_footer {
+            menu::show_footer(ctx, &self.panes);
+        }
+
+        // Slider panel (bottom)
+        self.show_slider_panel(ctx);
+
+        // Central panel (must be last — fills remaining space)
+        self.show_central_panel(ctx);
+
+        // Overlays
+        if self.show_fps {
+            self.perf.show_overlay(ctx);
+        }
+
+        if self.show_cache_overlay {
+            if let Some(pane) = self.panes.first() {
+                if let Some(cache) = &pane.cache {
+                    cache.show_debug_overlay(ctx, pane.current_index, pane.image_paths.len());
+                }
             }
         }
     }

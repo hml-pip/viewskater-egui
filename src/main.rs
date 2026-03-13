@@ -7,6 +7,7 @@ mod app;
 mod cache;
 mod decode;
 mod file_io;
+mod menu;
 mod pane;
 mod perf;
 
