@@ -49,24 +49,25 @@ impl UiTheme {
     /// Sets accent colors, brightens text for VSCode-like contrast,
     /// and uses an accent-tinted background for hover/open states.
     pub fn apply_to_visuals(&self, ctx: &egui::Context) {
-        let mut visuals = egui::Visuals::dark();
+        let mut style = (*ctx.style()).clone();
+        style.visuals = egui::Visuals::dark();
 
         // Accent colors for selection, active widgets, hyperlinks
-        visuals.selection.bg_fill = self.accent;
-        visuals.hyperlink_color = self.accent;
-        visuals.widgets.active.bg_fill = self.accent;
+        style.visuals.selection.bg_fill = self.accent;
+        style.visuals.hyperlink_color = self.accent;
+        style.visuals.widgets.active.bg_fill = self.accent;
 
         // Bright widget text (default dark theme is too pale)
-        visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_gray(210);
-        visuals.widgets.inactive.fg_stroke.color = egui::Color32::from_gray(220);
-        visuals.widgets.hovered.fg_stroke.color = egui::Color32::from_gray(255);
-        visuals.widgets.active.fg_stroke.color = egui::Color32::from_gray(255);
-        visuals.widgets.open.fg_stroke.color = egui::Color32::from_gray(255);
+        style.visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::from_gray(210);
+        style.visuals.widgets.inactive.fg_stroke.color = egui::Color32::from_gray(220);
+        style.visuals.widgets.hovered.fg_stroke.color = egui::Color32::from_gray(255);
+        style.visuals.widgets.active.fg_stroke.color = egui::Color32::from_gray(255);
+        style.visuals.widgets.open.fg_stroke.color = egui::Color32::from_gray(255);
 
         // Light gray hover/open backgrounds (matches iced's background.weak)
-        visuals.widgets.hovered.weak_bg_fill = self.menu_hover;
-        visuals.widgets.open.weak_bg_fill = self.menu_hover;
+        style.visuals.widgets.hovered.weak_bg_fill = self.menu_hover;
+        style.visuals.widgets.open.weak_bg_fill = self.menu_hover;
 
-        ctx.set_visuals(visuals);
+        ctx.set_style(style);
     }
 }

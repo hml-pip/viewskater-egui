@@ -34,30 +34,57 @@ pub(crate) fn toggle_switch(ui: &mut egui::Ui, on: &mut bool, label: &str, theme
     response.clicked()
 }
 
+/// Disable egui's built-in button hover/active/open backgrounds inside
+/// a menu popup (so `hover_row` can draw its own full-width highlight),
+/// and return the full popup rect coordinates including margins.
+fn setup_menu_hover(ui: &mut egui::Ui) -> (f32, f32) {
+    let style = ui.style_mut();
+    style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+    style.visuals.widgets.hovered.weak_bg_fill = egui::Color32::TRANSPARENT;
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+    style.visuals.widgets.active.weak_bg_fill = egui::Color32::TRANSPARENT;
+    style.visuals.widgets.active.bg_stroke = egui::Stroke::NONE;
+    style.visuals.widgets.open.weak_bg_fill = egui::Color32::TRANSPARENT;
+    style.visuals.widgets.open.bg_stroke = egui::Stroke::NONE;
+    let margin = style.spacing.menu_margin;
+    let ml = margin.left as f32;
+    let mr = margin.right as f32;
+    (
+        ui.cursor().min.x - ml,
+        ui.available_width() + ml + mr,
+    )
+}
+
 /// Full-width menu row with hover background highlight.
 ///
 /// Uses a Noop shape placeholder so the background is painted behind
-/// content that's drawn afterwards.
+/// content that's drawn afterwards. The highlight rect spans the full
+/// popup width (including margins) so it reaches the popup border.
+/// Hover is detected via raw pointer position to avoid stealing
+/// interaction from child widgets (e.g. sub-menu buttons).
 fn hover_row(
     ui: &mut egui::Ui,
-    id_salt: &str,
+    _id_salt: &str,
     theme: &UiTheme,
+    menu_left: f32,
+    menu_width: f32,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
     let bg_idx = ui.painter().add(egui::Shape::Noop);
-    let available_width = ui.available_width();
     let row = ui.horizontal(|ui| {
-        ui.set_min_width(available_width);
         add_contents(ui);
     });
-    let rect = row.response.rect;
-    if ui
-        .interact(rect, ui.id().with(id_salt), egui::Sense::hover())
-        .hovered()
-    {
+    let highlight = egui::Rect::from_min_size(
+        egui::pos2(menu_left, row.response.rect.min.y),
+        egui::vec2(menu_width, row.response.rect.height()),
+    );
+    let hovered = ui
+        .ctx()
+        .input(|i| i.pointer.hover_pos().is_some_and(|p| highlight.contains(p)));
+    if hovered {
         ui.painter().set(
             bg_idx,
-            egui::Shape::rect_filled(rect, 2.0, theme.menu_hover),
+            egui::Shape::rect_filled(highlight, 0.0, theme.menu_hover),
         );
     }
 }
@@ -75,47 +102,77 @@ pub fn show_menu_bar(
     egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
-                ui.menu_button("Open Folder  Ctrl+Shift+O", |ui| {
-                    if ui.button("Pane 1").clicked() {
-                        action = MenuAction::OpenFolder(0);
-                        ui.close_menu();
-                    }
-                    if is_dual && ui.button("Pane 2").clicked() {
-                        action = MenuAction::OpenFolder(1);
-                        ui.close_menu();
-                    }
+                let (ml, mw) = setup_menu_hover(ui);
+                hover_row(ui, "open_folder", theme, ml, mw, |ui| {
+                    ui.menu_button("Open Folder  Ctrl+Shift+O", |ui| {
+                        let (sl, sw) = setup_menu_hover(ui);
+                        hover_row(ui, "pane1_folder", theme, sl, sw, |ui| {
+                            if ui.button("Pane 1").clicked() {
+                                action = MenuAction::OpenFolder(0);
+                                ui.close_menu();
+                            }
+                        });
+                        if is_dual {
+                            hover_row(ui, "pane2_folder", theme, sl, sw, |ui| {
+                                if ui.button("Pane 2").clicked() {
+                                    action = MenuAction::OpenFolder(1);
+                                    ui.close_menu();
+                                }
+                            });
+                        }
+                    });
                 });
-                ui.menu_button("Open File  Ctrl+O", |ui| {
-                    if ui.button("Pane 1").clicked() {
-                        action = MenuAction::OpenFile(0);
-                        ui.close_menu();
-                    }
-                    if is_dual && ui.button("Pane 2").clicked() {
-                        action = MenuAction::OpenFile(1);
-                        ui.close_menu();
-                    }
+                hover_row(ui, "open_file", theme, ml, mw, |ui| {
+                    ui.menu_button("Open File  Ctrl+O", |ui| {
+                        let (sl, sw) = setup_menu_hover(ui);
+                        hover_row(ui, "pane1_file", theme, sl, sw, |ui| {
+                            if ui.button("Pane 1").clicked() {
+                                action = MenuAction::OpenFile(0);
+                                ui.close_menu();
+                            }
+                        });
+                        if is_dual {
+                            hover_row(ui, "pane2_file", theme, sl, sw, |ui| {
+                                if ui.button("Pane 2").clicked() {
+                                    action = MenuAction::OpenFile(1);
+                                    ui.close_menu();
+                                }
+                            });
+                        }
+                    });
                 });
                 ui.separator();
-                if ui.add_enabled(has_images, egui::Button::new("Close  Ctrl+W")).clicked() {
-                    action = MenuAction::Close;
-                    ui.close_menu();
-                }
-                if ui.button("Quit  Ctrl+Q").clicked() {
-                    action = MenuAction::Quit;
-                    ui.close_menu();
-                }
+                hover_row(ui, "close", theme, ml, mw, |ui| {
+                    if ui
+                        .add_enabled(has_images, egui::Button::new("Close  Ctrl+W"))
+                        .clicked()
+                    {
+                        action = MenuAction::Close;
+                        ui.close_menu();
+                    }
+                });
+                hover_row(ui, "quit", theme, ml, mw, |ui| {
+                    if ui.button("Quit  Ctrl+Q").clicked() {
+                        action = MenuAction::Quit;
+                        ui.close_menu();
+                    }
+                });
             });
 
             ui.menu_button("Edit", |ui| {
-                if ui.button("Preferences").clicked() {
-                    action = MenuAction::ShowSettings;
-                    ui.close_menu();
-                }
+                let (ml, mw) = setup_menu_hover(ui);
+                hover_row(ui, "preferences", theme, ml, mw, |ui| {
+                    if ui.button("Preferences").clicked() {
+                        action = MenuAction::ShowSettings;
+                        ui.close_menu();
+                    }
+                });
             });
 
             ui.menu_button("View", |ui| {
+                let (ml, mw) = setup_menu_hover(ui);
                 let pane_count = panes.len();
-                hover_row(ui, "single_pane", theme, |ui| {
+                hover_row(ui, "single_pane", theme, ml, mw, |ui| {
                     if ui.radio(pane_count == 1, "Single Pane  Ctrl+1").clicked() {
                         if pane_count != 1 {
                             action = MenuAction::SetSinglePane;
@@ -123,7 +180,7 @@ pub fn show_menu_bar(
                         ui.close_menu();
                     }
                 });
-                hover_row(ui, "dual_pane", theme, |ui| {
+                hover_row(ui, "dual_pane", theme, ml, mw, |ui| {
                     if ui.radio(pane_count >= 2, "Dual Pane  Ctrl+2").clicked() {
                         if pane_count < 2 {
                             action = MenuAction::SetDualPane;
@@ -132,22 +189,25 @@ pub fn show_menu_bar(
                     }
                 });
                 ui.separator();
-                hover_row(ui, "footer", theme, |ui| {
+                hover_row(ui, "footer", theme, ml, mw, |ui| {
                     toggle_switch(ui, &mut settings.show_footer, "Footer  Tab", theme);
                 });
-                hover_row(ui, "fps", theme, |ui| {
+                hover_row(ui, "fps", theme, ml, mw, |ui| {
                     toggle_switch(ui, &mut settings.show_fps, "FPS Overlay", theme);
                 });
-                hover_row(ui, "cache", theme, |ui| {
+                hover_row(ui, "cache", theme, ml, mw, |ui| {
                     toggle_switch(ui, &mut settings.show_cache_overlay, "Cache Overlay", theme);
                 });
             });
 
             ui.menu_button("Help", |ui| {
-                if ui.button("About").clicked() {
-                    action = MenuAction::ShowAbout;
-                    ui.close_menu();
-                }
+                let (ml, mw) = setup_menu_hover(ui);
+                hover_row(ui, "about", theme, ml, mw, |ui| {
+                    if ui.button("About").clicked() {
+                        action = MenuAction::ShowAbout;
+                        ui.close_menu();
+                    }
+                });
             });
         });
     });
