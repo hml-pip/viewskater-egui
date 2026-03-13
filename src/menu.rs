@@ -262,6 +262,25 @@ pub fn show_footer(ctx: &egui::Context, panes: &[Pane]) {
                                 .size(13.0),
                         );
                     }
+
+                    // Image index (right-aligned)
+                    if !pane.image_paths.is_empty() {
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} / {}",
+                                        pane.current_index + 1,
+                                        pane.image_paths.len()
+                                    ))
+                                    .monospace()
+                                    .color(egui::Color32::from_gray(200))
+                                    .size(13.0),
+                                );
+                            },
+                        );
+                    }
                 }
             }
         });

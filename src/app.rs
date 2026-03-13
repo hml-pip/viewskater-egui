@@ -303,74 +303,57 @@ impl App {
         let mut slider_released = false;
 
         egui::TopBottomPanel::bottom("nav").show(ctx, |ui| {
-            let label_text = format!("{} / {}", current_idx + 1, max_images);
+            let mut idx = current_idx;
+            let max = max_images - 1;
 
-            ui.horizontal(|ui| {
-                let mut idx = current_idx;
-                let max = max_images - 1;
+            // Custom slider: accent handle + two-tone rail (full width)
+            let slider_width = ui.available_width();
+            let thickness = ui
+                .text_style_height(&egui::TextStyle::Body)
+                .max(ui.spacing().interact_size.y);
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(slider_width, thickness), egui::Sense::drag());
 
-                // Measure label width so slider can fill the rest
-                let label_galley = ui.fonts(|f| {
-                    f.layout_no_wrap(
-                        label_text.clone(),
-                        egui::FontId::default(),
-                        egui::Color32::WHITE,
-                    )
-                });
-                let label_width = label_galley.size().x + ui.spacing().item_spacing.x * 2.0;
+            let handle_radius = rect.height() / 2.5;
+            let rail_radius = 4.0_f32;
+            let cy = rect.center().y;
+            let handle_range =
+                (rect.left() + handle_radius)..=(rect.right() - handle_radius);
 
-                // Custom slider: accent handle + two-tone rail
-                let slider_width = ui.available_width() - label_width;
-                let thickness = ui
-                    .text_style_height(&egui::TextStyle::Body)
-                    .max(ui.spacing().interact_size.y);
-                let (rect, response) =
-                    ui.allocate_exact_size(egui::vec2(slider_width, thickness), egui::Sense::drag());
-
-                let handle_radius = rect.height() / 2.5;
-                let rail_radius = 4.0_f32;
-                let cy = rect.center().y;
-                let handle_range =
-                    (rect.left() + handle_radius)..=(rect.right() - handle_radius);
-
-                // Handle dragging
-                if let Some(pos) = response.interact_pointer_pos() {
-                    let usable = rect.x_range().shrink(handle_radius);
-                    let drag_t =
-                        ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
-                    idx = (max as f32 * drag_t).round() as usize;
-                    if idx != current_idx {
-                        slider_target = Some(idx);
-                    }
+            // Handle dragging
+            if let Some(pos) = response.interact_pointer_pos() {
+                let usable = rect.x_range().shrink(handle_radius);
+                let drag_t =
+                    ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
+                idx = (max as f32 * drag_t).round() as usize;
+                if idx != current_idx {
+                    slider_target = Some(idx);
                 }
-                if response.drag_stopped() {
-                    slider_released = true;
-                }
+            }
+            if response.drag_stopped() {
+                slider_released = true;
+            }
 
-                // Paint: unfilled rail → filled rail → handle (back to front)
-                let rail = egui::Rect::from_min_max(
-                    egui::pos2(rect.left(), cy - rail_radius),
-                    egui::pos2(rect.right(), cy + rail_radius),
-                );
-                // Recompute handle_x after potential drag update
-                let t = if max > 0 { idx as f32 / max as f32 } else { 0.0 };
-                let handle_x = egui::lerp(handle_range, t);
+            // Paint: unfilled rail → filled rail → handle (back to front)
+            let rail = egui::Rect::from_min_max(
+                egui::pos2(rect.left(), cy - rail_radius),
+                egui::pos2(rect.right(), cy + rail_radius),
+            );
+            let t = if max > 0 { idx as f32 / max as f32 } else { 0.0 };
+            let handle_x = egui::lerp(handle_range, t);
 
-                ui.painter()
-                    .rect_filled(rail, rail_radius, egui::Color32::from_gray(60));
-                let filled =
-                    egui::Rect::from_min_max(rail.min, egui::pos2(handle_x, rail.max.y));
-                ui.painter()
-                    .rect_filled(filled, rail_radius, self.theme.accent);
-                ui.painter().circle(
-                    egui::pos2(handle_x, cy),
-                    handle_radius,
-                    self.theme.accent,
-                    egui::Stroke::NONE,
-                );
-
-                ui.label(label_text);
-            });
+            ui.painter()
+                .rect_filled(rail, rail_radius, egui::Color32::from_gray(60));
+            let filled =
+                egui::Rect::from_min_max(rail.min, egui::pos2(handle_x, rail.max.y));
+            ui.painter()
+                .rect_filled(filled, rail_radius, self.theme.accent);
+            ui.painter().circle(
+                egui::pos2(handle_x, cy),
+                handle_radius,
+                self.theme.accent,
+                egui::Stroke::NONE,
+            );
         });
 
         if let Some(idx) = slider_target {
