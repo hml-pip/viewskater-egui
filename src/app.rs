@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
-use crate::pane::PaneState;
+use crate::pane::Pane;
 use crate::perf;
 
 pub struct App {
-    panes: Vec<PaneState>,
+    panes: Vec<Pane>,
     perf: perf::ImagePerfTracker,
     divider_fraction: f32,
 }
@@ -14,7 +14,7 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, paths: Vec<PathBuf>) -> Self {
         let mut app = Self {
-            panes: vec![PaneState::new()],
+            panes: vec![Pane::new()],
             perf: perf::ImagePerfTracker::new(),
             divider_fraction: 0.5,
         };
@@ -23,7 +23,7 @@ impl App {
             app.panes[0].open_path(&paths[0], &cc.egui_ctx);
         }
         if paths.len() >= 2 {
-            let mut pane1 = PaneState::new();
+            let mut pane1 = Pane::new();
             pane1.open_path(&paths[1], &cc.egui_ctx);
             app.panes.push(pane1);
         }
@@ -36,11 +36,15 @@ impl App {
     }
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
-        let (home, end, nav_right_held, nav_left_held, toggle_dual, set_single, set_dual) =
+        let (home, end, shift, nav_right_pressed, nav_left_pressed,
+             nav_right_held, nav_left_held, toggle_dual, set_single, set_dual) =
             ctx.input(|i| {
                 (
                     i.key_pressed(egui::Key::Home),
                     i.key_pressed(egui::Key::End),
+                    i.modifiers.shift,
+                    i.key_pressed(egui::Key::ArrowRight) || i.key_pressed(egui::Key::D),
+                    i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::A),
                     i.key_down(egui::Key::ArrowRight) || i.key_down(egui::Key::D),
                     i.key_down(egui::Key::ArrowLeft) || i.key_down(egui::Key::A),
                     i.key_pressed(egui::Key::Tab),
@@ -49,12 +53,17 @@ impl App {
                 )
             });
 
+        // Skate mode (Shift held): advance every frame while key is down
+        // Normal mode: advance once per key press/repeat event (~30hz)
+        let nav_right = if shift { nav_right_held } else { nav_right_pressed };
+        let nav_left = if shift { nav_left_held } else { nav_left_pressed };
+
         if set_single && self.panes.len() >= 2 {
             self.panes.truncate(1);
             return;
         }
         if set_dual && self.panes.len() == 1 {
-            let mut pane = PaneState::new();
+            let mut pane = Pane::new();
             if !self.panes[0].image_paths.is_empty() {
                 if let Some(dir) = self.panes[0].image_paths[0].parent() {
                     pane.open_path(dir, ctx);
@@ -69,7 +78,7 @@ impl App {
             if self.panes.len() >= 2 {
                 self.panes.truncate(1);
             } else if !self.panes.is_empty() {
-                let mut pane = PaneState::new();
+                let mut pane = Pane::new();
                 if !self.panes[0].image_paths.is_empty() {
                     if let Some(dir) = self.panes[0].image_paths[0].parent() {
                         pane.open_path(dir, ctx);
@@ -92,7 +101,7 @@ impl App {
                 pane.jump_to(last, ctx);
             }
             self.perf.record_image_load(0.0);
-        } else if nav_right_held {
+        } else if nav_right {
             // Only advance if ALL panes have the next image cached (synced nav)
             let all_ready = self.panes.iter().all(|p| p.is_next_cached(1));
             if all_ready {
@@ -106,7 +115,7 @@ impl App {
             if any_can {
                 ctx.request_repaint();
             }
-        } else if nav_left_held {
+        } else if nav_left {
             let all_ready = self.panes.iter().all(|p| p.is_next_cached(-1));
             if all_ready {
                 let any_advanced = self.panes.iter_mut().fold(false, |acc, p| p.navigate(-1) || acc);
