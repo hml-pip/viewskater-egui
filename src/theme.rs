@@ -32,7 +32,7 @@ impl UiTheme {
     pub fn teal_dark() -> Self {
         Self {
             accent: egui::Color32::from_rgb(26, 189, 208),
-            backdrop: egui::Color32::from_black_alpha(204),
+            backdrop: egui::Color32::from_black_alpha(140),
             card_bg: egui::Color32::from_gray(40),
             card_stroke: egui::Color32::from_gray(80),
             section_bg: egui::Color32::from_gray(30),
