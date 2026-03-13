@@ -67,6 +67,10 @@ impl UiTheme {
         // Remove panel separator lines for a cleaner look
         style.visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
 
+        // Remove popup/menu shadows
+        style.visuals.popup_shadow = egui::Shadow::NONE;
+        style.visuals.window_shadow = egui::Shadow::NONE;
+
         // Light gray hover/open backgrounds (matches iced's background.weak)
         style.visuals.widgets.hovered.weak_bg_fill = self.menu_hover;
         style.visuals.widgets.open.weak_bg_fill = self.menu_hover;
