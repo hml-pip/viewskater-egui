@@ -207,8 +207,6 @@ impl App {
                 let clamped = idx.min(pane.image_paths.len().saturating_sub(1));
                 if clamped != pane.current_index {
                     pane.current_index = clamped;
-                    pane.zoom = 1.0;
-                    pane.pan = egui::Vec2::ZERO;
 
                     let found_in_cache = pane
                         .cache
@@ -251,8 +249,6 @@ impl App {
                 let clamped = idx.min(pane.image_paths.len().saturating_sub(1));
                 if clamped != pane.current_index {
                     pane.current_index = clamped;
-                    pane.zoom = 1.0;
-                    pane.pan = egui::Vec2::ZERO;
 
                     let found_in_cache = pane
                         .cache

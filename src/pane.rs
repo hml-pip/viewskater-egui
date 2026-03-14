@@ -178,8 +178,6 @@ impl Pane {
         if let Some(cache) = &mut self.cache {
             if let Some(t) = cache.current_texture_for(new_index) {
                 self.current_index = new_index;
-                self.zoom = 1.0;
-                self.pan = egui::Vec2::ZERO;
                 self.current_texture = Some(t);
 
                 if delta > 0 {
@@ -200,8 +198,6 @@ impl Pane {
         }
 
         self.current_index = index;
-        self.zoom = 1.0;
-        self.pan = egui::Vec2::ZERO;
 
         if let Some(cache) = &mut self.cache {
             cache.jump_to(index, &self.image_paths);
