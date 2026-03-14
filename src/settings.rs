@@ -108,7 +108,7 @@ impl Default for AppSettings {
             show_footer: true,
             show_fps: true,
             show_cache_overlay: false,
-            sync_zoom_pan: false,
+            sync_zoom_pan: true,
             cache_count: 5,
             lru_capacity: 50,
         }
