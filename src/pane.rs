@@ -310,8 +310,9 @@ impl Pane {
         let center = available.center() + self.pan;
         let display_rect = egui::Rect::from_center_size(center, display_size);
 
+        // Clip to the pane rect so zoomed images don't bleed into adjacent panes
+        let painter = ui.painter_at(available);
         let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        ui.painter()
-            .image(tex.id(), display_rect, uv, egui::Color32::WHITE);
+        painter.image(tex.id(), display_rect, uv, egui::Color32::WHITE);
     }
 }
