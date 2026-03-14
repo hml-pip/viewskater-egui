@@ -16,7 +16,7 @@ const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum DualPaneMode {
+pub(crate) enum DualPaneMode {
     Synced,
     Independent,
 }
@@ -131,7 +131,7 @@ impl App {
         }
 
         if app.panes[0].current_texture.is_some() {
-            app.perf.record_image_load(0.0);
+            app.perf.record_image_load();
         }
 
         app
@@ -156,7 +156,7 @@ impl App {
                 format!("Left: {} | Right: {}", left, right)
             }
         } else {
-            name(self.panes.first().unwrap_or(&Pane::new(0, 0)))
+            self.panes.first().and_then(name)
                 .unwrap_or_else(|| "ViewSkater".to_string())
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
@@ -438,10 +438,10 @@ impl eframe::App for App {
         self.update_title(ctx);
 
         // Menu bar (top)
-        let (fps_primary, fps_secondary) = if self.settings.show_fps {
-            (Some(self.perf.fps_primary()), self.perf.fps_secondary())
+        let fps_text = if self.settings.show_fps {
+            Some(self.perf.fps_text())
         } else {
-            (None, None)
+            None
         };
         let settings_snapshot = self.settings.clone();
         let action = menu::show_menu_bar(
@@ -450,8 +450,7 @@ impl eframe::App for App {
             self.dual_pane_mode,
             &mut self.settings,
             &self.theme,
-            fps_primary.as_deref(),
-            fps_secondary.as_deref(),
+            fps_text.as_deref(),
         );
         if self.settings != settings_snapshot {
             self.settings.save();

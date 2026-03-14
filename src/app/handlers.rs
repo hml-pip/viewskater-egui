@@ -82,7 +82,7 @@ impl App {
         if let Some(idx) = result.target {
             for pane in &mut self.panes {
                 if pane.apply_slider_target(idx, ctx) {
-                    self.perf.record_image_load(0.0);
+                    self.perf.record_image_load();
                 }
             }
             ctx.request_repaint();
@@ -105,7 +105,7 @@ impl App {
         if let Some(idx) = result.target {
             if let Some(pane) = self.panes.get_mut(pane_idx) {
                 if pane.apply_slider_target(idx, ctx) {
-                    self.perf.record_image_load(0.0);
+                    self.perf.record_image_load();
                 }
             }
             ctx.request_repaint();
@@ -135,7 +135,7 @@ impl App {
 
     pub(super) fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let (home, end, shift, nav_right_pressed, nav_left_pressed,
-             nav_right_held, nav_left_held, toggle_dual, set_single, set_dual,
+             nav_right_held, nav_left_held, set_single, set_dual,
              set_independent, select_pane1, select_pane2,
              toggle_footer, open_folder, open_file, close, quit) =
             ctx.input(|i| {
@@ -147,7 +147,6 @@ impl App {
                     i.key_pressed(egui::Key::ArrowLeft) || i.key_pressed(egui::Key::A),
                     i.key_down(egui::Key::ArrowRight) || i.key_down(egui::Key::D),
                     i.key_down(egui::Key::ArrowLeft) || i.key_down(egui::Key::A),
-                    i.key_pressed(egui::Key::Tab),
                     i.key_pressed(egui::Key::Num1) && i.modifiers.command,
                     i.key_pressed(egui::Key::Num2) && i.modifiers.command,
                     i.key_pressed(egui::Key::Num3) && i.modifiers.command,
@@ -215,15 +214,6 @@ impl App {
             return;
         }
 
-        if toggle_dual {
-            if self.panes.len() >= 2 {
-                self.set_single_pane();
-            } else if !self.panes.is_empty() {
-                self.set_dual_pane(ctx);
-            }
-            return;
-        }
-
         // In independent mode, only navigate selected panes;
         // in synced mode, navigate all panes.
         let use_selection = self.dual_pane_mode == DualPaneMode::Independent;
@@ -235,7 +225,7 @@ impl App {
                     pane.jump_to(0, ctx);
                 }
             }
-            self.perf.record_image_load(0.0);
+            self.perf.record_image_load();
         } else if end {
             for pane in &mut self.panes {
                 if is_active(pane) {
@@ -243,7 +233,7 @@ impl App {
                     pane.jump_to(last, ctx);
                 }
             }
-            self.perf.record_image_load(0.0);
+            self.perf.record_image_load();
         } else if nav_right {
             let all_ready = self.panes.iter().all(|p| {
                 !is_active(p) || p.image_paths.is_empty() || p.is_next_cached(1)
@@ -253,7 +243,7 @@ impl App {
                     if is_active(p) { p.navigate(1) || acc } else { acc }
                 });
                 if any_advanced {
-                    self.perf.record_image_load(0.0);
+                    self.perf.record_image_load();
                 }
             }
             let any_can = self.panes.iter().any(|p| is_active(p) && p.can_navigate_forward());
@@ -269,7 +259,7 @@ impl App {
                     if is_active(p) { p.navigate(-1) || acc } else { acc }
                 });
                 if any_advanced {
-                    self.perf.record_image_load(0.0);
+                    self.perf.record_image_load();
                 }
             }
             let any_can = self.panes.iter().any(|p| is_active(p) && p.can_navigate_backward());

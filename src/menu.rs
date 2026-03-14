@@ -65,7 +65,6 @@ fn setup_menu_hover(ui: &mut egui::Ui) -> (f32, f32) {
 /// interaction from child widgets (e.g. sub-menu buttons).
 fn hover_row(
     ui: &mut egui::Ui,
-    _id_salt: &str,
     theme: &UiTheme,
     menu_left: f32,
     menu_width: f32,
@@ -90,14 +89,13 @@ fn hover_row(
     }
 }
 
-pub fn show_menu_bar(
+pub(crate) fn show_menu_bar(
     ctx: &egui::Context,
     panes: &[Pane],
     dual_pane_mode: DualPaneMode,
     settings: &mut AppSettings,
     theme: &UiTheme,
-    fps_primary: Option<&str>,
-    fps_secondary: Option<&str>,
+    fps_text: Option<&str>,
 ) -> MenuAction {
     let mut action = MenuAction::None;
     let is_dual = panes.len() >= 2;
@@ -118,17 +116,17 @@ pub fn show_menu_bar(
         egui::menu::bar(ui, |ui| {
             ui.menu_button(file_label, |ui| {
                 let (ml, mw) = setup_menu_hover(ui);
-                hover_row(ui, "open_folder", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     ui.menu_button("Open Folder  Ctrl+Shift+O", |ui| {
                         let (sl, sw) = setup_menu_hover(ui);
-                        hover_row(ui, "pane1_folder", theme, sl, sw, |ui| {
+                        hover_row(ui, theme, sl, sw, |ui| {
                             if ui.button("Pane 1").clicked() {
                                 action = MenuAction::OpenFolder(0);
                                 ui.close_menu();
                             }
                         });
                         if is_dual {
-                            hover_row(ui, "pane2_folder", theme, sl, sw, |ui| {
+                            hover_row(ui, theme, sl, sw, |ui| {
                                 if ui.button("Pane 2").clicked() {
                                     action = MenuAction::OpenFolder(1);
                                     ui.close_menu();
@@ -137,17 +135,17 @@ pub fn show_menu_bar(
                         }
                     });
                 });
-                hover_row(ui, "open_file", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     ui.menu_button("Open File  Ctrl+O", |ui| {
                         let (sl, sw) = setup_menu_hover(ui);
-                        hover_row(ui, "pane1_file", theme, sl, sw, |ui| {
+                        hover_row(ui, theme, sl, sw, |ui| {
                             if ui.button("Pane 1").clicked() {
                                 action = MenuAction::OpenFile(0);
                                 ui.close_menu();
                             }
                         });
                         if is_dual {
-                            hover_row(ui, "pane2_file", theme, sl, sw, |ui| {
+                            hover_row(ui, theme, sl, sw, |ui| {
                                 if ui.button("Pane 2").clicked() {
                                     action = MenuAction::OpenFile(1);
                                     ui.close_menu();
@@ -157,7 +155,7 @@ pub fn show_menu_bar(
                     });
                 });
                 ui.separator();
-                hover_row(ui, "close", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     if ui
                         .add_enabled(has_images, egui::Button::new("Close  Ctrl+W"))
                         .clicked()
@@ -166,7 +164,7 @@ pub fn show_menu_bar(
                         ui.close_menu();
                     }
                 });
-                hover_row(ui, "quit", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     if ui.button("Quit  Ctrl+Q").clicked() {
                         action = MenuAction::Quit;
                         ui.close_menu();
@@ -177,7 +175,7 @@ pub fn show_menu_bar(
             if show_edit {
                 ui.menu_button("Edit", |ui| {
                     let (ml, mw) = setup_menu_hover(ui);
-                    hover_row(ui, "preferences", theme, ml, mw, |ui| {
+                    hover_row(ui, theme, ml, mw, |ui| {
                         if ui.button("Preferences").clicked() {
                             action = MenuAction::ShowSettings;
                             ui.close_menu();
@@ -194,7 +192,7 @@ pub fn show_menu_bar(
                 let is_synced = pane_count >= 2 && dual_pane_mode == DualPaneMode::Synced;
                 let is_independent =
                     pane_count >= 2 && dual_pane_mode == DualPaneMode::Independent;
-                hover_row(ui, "single_pane", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     if ui.radio(is_single, "Single Pane  Ctrl+1").clicked() {
                         if !is_single {
                             action = MenuAction::SetSinglePane;
@@ -202,7 +200,7 @@ pub fn show_menu_bar(
                         ui.close_menu();
                     }
                 });
-                hover_row(ui, "dual_synced", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     if ui.radio(is_synced, "Dual Pane (Synced)  Ctrl+2").clicked() {
                         if !is_synced {
                             action = MenuAction::SetDualPane;
@@ -210,7 +208,7 @@ pub fn show_menu_bar(
                         ui.close_menu();
                     }
                 });
-                hover_row(ui, "dual_independent", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     if ui
                         .radio(is_independent, "Dual Pane (Independent)  Ctrl+3")
                         .clicked()
@@ -222,24 +220,24 @@ pub fn show_menu_bar(
                     }
                 });
                 ui.separator();
-                hover_row(ui, "reset_zoom", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     if ui.button("Reset Zoom/Pan").clicked() {
                         action = MenuAction::ResetZoom;
                         ui.close_menu();
                     }
                 });
                 ui.separator();
-                hover_row(ui, "footer", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     ui.horizontal(|ui| {
                         toggle_switch(ui, &mut settings.show_footer, "Footer  Tab", theme);
                     });
                 });
-                hover_row(ui, "fps", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     ui.horizontal(|ui| {
                         toggle_switch(ui, &mut settings.show_fps, "FPS Overlay", theme);
                     });
                 });
-                hover_row(ui, "cache", theme, ml, mw, |ui| {
+                hover_row(ui, theme, ml, mw, |ui| {
                     ui.horizontal(|ui| {
                         toggle_switch(
                             ui,
@@ -255,7 +253,7 @@ pub fn show_menu_bar(
             if show_help {
                 ui.menu_button("Help", |ui| {
                     let (ml, mw) = setup_menu_hover(ui);
-                    hover_row(ui, "about", theme, ml, mw, |ui| {
+                    hover_row(ui, theme, ml, mw, |ui| {
                         if ui.button("About").clicked() {
                             action = MenuAction::ShowAbout;
                             ui.close_menu();
@@ -265,44 +263,17 @@ pub fn show_menu_bar(
             }
 
             // FPS display (right-aligned, only if space remains after menus)
-            if fps_primary.is_some() {
+            if let Some(fps) = fps_text {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let remaining = ui.available_width();
                     let font = egui::FontId::monospace(12.0);
                     let fps_color = egui::Color32::from_gray(220);
-
-                    let primary = fps_primary.unwrap();
-                    let primary_w = ui.fonts(|f| {
-                        f.layout_no_wrap(primary.into(), font.clone(), fps_color)
-                            .size()
-                            .x
+                    let fps_w = ui.fonts(|f| {
+                        f.layout_no_wrap(fps.into(), font, fps_color).size().x
                     });
-
-                    if let Some(secondary) = fps_secondary {
-                        let full = format!("{} | {}", primary, secondary);
-                        let full_w = ui.fonts(|f| {
-                            f.layout_no_wrap(full.clone(), font.clone(), fps_color)
-                                .size()
-                                .x
-                        });
-                        if remaining >= full_w + 8.0 {
-                            ui.label(
-                                egui::RichText::new(full)
-                                    .monospace()
-                                    .color(fps_color)
-                                    .size(12.0),
-                            );
-                        } else if remaining >= primary_w + 8.0 {
-                            ui.label(
-                                egui::RichText::new(primary)
-                                    .monospace()
-                                    .color(fps_color)
-                                    .size(12.0),
-                            );
-                        }
-                    } else if remaining >= primary_w + 8.0 {
+                    if remaining >= fps_w + 8.0 {
                         ui.label(
-                            egui::RichText::new(primary)
+                            egui::RichText::new(fps)
                                 .monospace()
                                 .color(fps_color)
                                 .size(12.0),
@@ -316,7 +287,7 @@ pub fn show_menu_bar(
     action
 }
 
-pub fn show_footer(ctx: &egui::Context, panes: &[Pane], divider_fraction: f32) {
+pub(crate) fn show_footer(ctx: &egui::Context, panes: &[Pane], divider_fraction: f32) {
     egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {
         if panes.len() >= 2 {
             let available = ui.available_rect_before_wrap();
@@ -460,7 +431,7 @@ fn format_file_size(bytes: u64) -> String {
 }
 
 #[derive(PartialEq)]
-pub enum MenuAction {
+pub(crate) enum MenuAction {
     None,
     OpenFolder(usize),
     OpenFile(usize),
