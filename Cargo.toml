@@ -21,6 +21,14 @@ clap = { version = "4", features = ["derive"] }
 log = "0.4"
 env_logger = "0.11"
 natord = "1.0"
+rfd = "0.15"
+webbrowser = "1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+dirs = "6"
+
+[build-dependencies]
+chrono = "0.4"
 
 [patch.crates-io]
 winit = { git = "https://github.com/ggand0/winit.git", branch = "custom-dnd-0.30.13" }

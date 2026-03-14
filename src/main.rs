@@ -3,12 +3,17 @@ use std::path::PathBuf;
 use clap::Parser;
 use eframe::egui;
 
+mod about;
 mod app;
+mod build_info;
 mod cache;
 mod decode;
 mod file_io;
+mod menu;
 mod pane;
 mod perf;
+mod settings;
+mod theme;
 
 #[derive(Parser)]
 #[command(name = "viewskater-egui", about = "Fast image viewer")]

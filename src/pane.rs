@@ -10,7 +10,7 @@ use crate::file_io;
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 100.0;
 
-pub struct PaneState {
+pub struct Pane {
     pub image_paths: Vec<PathBuf>,
     pub current_index: usize,
     pub current_texture: Option<egui::TextureHandle>,
@@ -19,10 +19,12 @@ pub struct PaneState {
     pub cache: Option<cache::SlidingWindowCache>,
     pub slider_loader: Option<cache::SliderLoader>,
     pub decode_cache: cache::DecodeLruCache,
+    pub cache_count: usize,
+    pub lru_capacity: usize,
 }
 
-impl PaneState {
-    pub fn new() -> Self {
+impl Pane {
+    pub fn new(cache_count: usize, lru_capacity: usize) -> Self {
         Self {
             image_paths: Vec::new(),
             current_index: 0,
@@ -31,8 +33,21 @@ impl PaneState {
             pan: egui::Vec2::ZERO,
             cache: None,
             slider_loader: None,
-            decode_cache: cache::DecodeLruCache::new(),
+            decode_cache: cache::DecodeLruCache::new(lru_capacity),
+            cache_count,
+            lru_capacity,
         }
+    }
+
+    pub fn close(&mut self) {
+        self.image_paths.clear();
+        self.current_index = 0;
+        self.current_texture = None;
+        self.zoom = 1.0;
+        self.pan = egui::Vec2::ZERO;
+        self.cache = None;
+        self.slider_loader = None;
+        self.decode_cache.clear();
     }
 
     pub fn open_path(&mut self, path: &std::path::Path, ctx: &egui::Context) {
@@ -64,7 +79,7 @@ impl PaneState {
         self.pan = egui::Vec2::ZERO;
         self.decode_cache.clear();
 
-        let mut c = cache::SlidingWindowCache::new(ctx);
+        let mut c = cache::SlidingWindowCache::new(ctx, self.cache_count);
         c.initialize(self.current_index, &self.image_paths);
         self.current_texture = c.current_texture_for(self.current_index);
         self.cache = Some(c);
