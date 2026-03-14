@@ -223,7 +223,7 @@ pub fn show_menu_bar(
                 });
                 ui.separator();
                 hover_row(ui, "reset_zoom", theme, ml, mw, |ui| {
-                    if ui.button("Reset Zoom").clicked() {
+                    if ui.button("Reset Zoom/Pan").clicked() {
                         action = MenuAction::ResetZoom;
                         ui.close_menu();
                     }
