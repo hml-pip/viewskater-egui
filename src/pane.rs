@@ -249,9 +249,29 @@ impl Pane {
         if let Some(tex) = tex {
             self.show_image(ui, &tex);
         } else if self.image_paths.is_empty() {
-            ui.centered_and_justified(|ui| {
-                ui.label("Drop an image or folder here, or pass a path as argument");
-            });
+            let available = ui.available_width();
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let measure = |text: &str| -> f32 {
+                ui.fonts(|f| {
+                    f.layout_no_wrap(text.into(), font.clone(), egui::Color32::WHITE)
+                        .size()
+                        .x
+                })
+            };
+            let full = "Drop an image or folder here";
+            let short = "Drop image";
+            let label = if available >= measure(full) {
+                Some(full)
+            } else if available >= measure(short) {
+                Some(short)
+            } else {
+                None
+            };
+            if let Some(text) = label {
+                ui.centered_and_justified(|ui| {
+                    ui.label(text);
+                });
+            }
         } else {
             ui.centered_and_justified(|ui| {
                 ui.label("Failed to load image");
