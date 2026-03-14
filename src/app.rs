@@ -210,10 +210,9 @@ impl App {
             }
             self.perf.record_image_load(0.0);
         } else if nav_right {
-            // Only advance if ALL panes have the next image cached (synced nav)
-            let all_ready = self.panes.iter().all(|p| p.is_next_cached(1));
+            // Only advance if all panes *that have images* have the next image cached
+            let all_ready = self.panes.iter().all(|p| p.image_paths.is_empty() || p.is_next_cached(1));
             if all_ready {
-                // fold instead of any() to avoid short-circuit — call navigate on every pane
                 let any_advanced = self.panes.iter_mut().fold(false, |acc, p| p.navigate(1) || acc);
                 if any_advanced {
                     self.perf.record_image_load(0.0);
@@ -224,7 +223,7 @@ impl App {
                 ctx.request_repaint();
             }
         } else if nav_left {
-            let all_ready = self.panes.iter().all(|p| p.is_next_cached(-1));
+            let all_ready = self.panes.iter().all(|p| p.image_paths.is_empty() || p.is_next_cached(-1));
             if all_ready {
                 let any_advanced = self.panes.iter_mut().fold(false, |acc, p| p.navigate(-1) || acc);
                 if any_advanced {
@@ -303,7 +302,12 @@ impl App {
             return;
         }
 
-        let current_idx = self.panes.first().map_or(0, |p| p.current_index);
+        // Use the first pane that has images for the slider position
+        let current_idx = self
+            .panes
+            .iter()
+            .find(|p| !p.image_paths.is_empty())
+            .map_or(0, |p| p.current_index);
         let mut slider_target = None;
         let mut slider_released = false;
 
