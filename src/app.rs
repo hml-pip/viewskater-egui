@@ -487,6 +487,9 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Force dark theme every frame (egui_winit can reapply system theme on macOS)
+        self.theme.apply_to_visuals(ctx);
+
         // On first frame, resize to achieve the target physical pixel size.
         // egui's with_inner_size uses logical points, so on scaled displays
         // (e.g. 1.25x) 1280x720 logical becomes 1600x900 physical. The iced
