@@ -13,10 +13,88 @@ use crate::theme::UiTheme;
 const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum DualPaneMode {
+    Synced,
+    Independent,
+}
+
+struct SliderResult {
+    target: Option<usize>,
+    released: bool,
+}
+
+/// Render a custom navigation slider (accent handle + two-tone rail).
+/// Returns the drag target index and whether the drag was released.
+fn paint_nav_slider(
+    ui: &mut egui::Ui,
+    current_idx: usize,
+    max_images: usize,
+    accent: egui::Color32,
+) -> SliderResult {
+    if max_images <= 1 {
+        return SliderResult {
+            target: None,
+            released: false,
+        };
+    }
+
+    let max = max_images - 1;
+    let mut idx = current_idx;
+    let mut target = None;
+
+    let slider_width = ui.available_width();
+    let thickness = ui
+        .text_style_height(&egui::TextStyle::Body)
+        .max(ui.spacing().interact_size.y);
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(slider_width, thickness), egui::Sense::drag());
+
+    let handle_radius = rect.height() / 2.5;
+    let rail_radius = 4.0_f32;
+    let cy = rect.center().y;
+    let handle_range = (rect.left() + handle_radius)..=(rect.right() - handle_radius);
+
+    if let Some(pos) = response.interact_pointer_pos() {
+        let usable = rect.x_range().shrink(handle_radius);
+        let drag_t = ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
+        idx = (max as f32 * drag_t).round() as usize;
+        if idx != current_idx {
+            target = Some(idx);
+        }
+    }
+    let released = response.drag_stopped();
+
+    let rail = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), cy - rail_radius),
+        egui::pos2(rect.right(), cy + rail_radius),
+    );
+    let t = if max > 0 {
+        idx as f32 / max as f32
+    } else {
+        0.0
+    };
+    let handle_x = egui::lerp(handle_range, t);
+
+    ui.painter()
+        .rect_filled(rail, rail_radius, egui::Color32::from_gray(60));
+    let filled = egui::Rect::from_min_max(rail.min, egui::pos2(handle_x, rail.max.y));
+    ui.painter().rect_filled(filled, rail_radius, accent);
+    ui.painter().circle(
+        egui::pos2(handle_x, cy),
+        handle_radius,
+        accent,
+        egui::Stroke::NONE,
+    );
+
+    SliderResult { target, released }
+}
+
 pub struct App {
     panes: Vec<Pane>,
     perf: perf::ImagePerfTracker,
     divider_fraction: f32,
+    dual_pane_mode: DualPaneMode,
     settings: AppSettings,
     theme: UiTheme,
     show_settings: bool,
@@ -33,6 +111,7 @@ impl App {
             panes: vec![Pane::new(settings.cache_count, settings.lru_capacity)],
             perf: perf::ImagePerfTracker::new(),
             divider_fraction: 0.5,
+            dual_pane_mode: DualPaneMode::Synced,
             settings,
             theme,
             show_settings: false,
@@ -108,9 +187,104 @@ impl App {
             MenuAction::Close => self.close_images(),
             MenuAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             MenuAction::SetSinglePane => self.set_single_pane(),
-            MenuAction::SetDualPane => self.set_dual_pane(ctx),
+            MenuAction::SetDualPane => {
+                self.set_dual_pane(ctx);
+                self.dual_pane_mode = DualPaneMode::Synced;
+            }
+            MenuAction::SetDualPaneIndependent => {
+                self.set_dual_pane(ctx);
+                self.dual_pane_mode = DualPaneMode::Independent;
+            }
             MenuAction::ShowAbout => self.show_about = true,
             MenuAction::ShowSettings => self.show_settings = true,
+        }
+    }
+
+    /// Apply slider result to all panes (synced mode).
+    fn apply_slider_result_all(&mut self, result: SliderResult, ctx: &egui::Context) {
+        if let Some(idx) = result.target {
+            for pane in &mut self.panes {
+                let clamped = idx.min(pane.image_paths.len().saturating_sub(1));
+                if clamped != pane.current_index {
+                    pane.current_index = clamped;
+                    pane.zoom = 1.0;
+                    pane.pan = egui::Vec2::ZERO;
+
+                    let found_in_cache = pane
+                        .cache
+                        .as_ref()
+                        .and_then(|c| c.current_texture_for(clamped));
+
+                    if let Some(tex) = found_in_cache {
+                        pane.current_texture = Some(tex);
+                        self.perf.record_image_load(0.0);
+                    } else if let Some(loader) = &mut pane.slider_loader {
+                        if loader.should_load() {
+                            pane.load_sync(ctx);
+                            self.perf.record_image_load(0.0);
+                        }
+                    }
+                }
+            }
+            ctx.request_repaint();
+        }
+
+        if result.released {
+            for pane in &mut self.panes {
+                if let Some(loader) = &mut pane.slider_loader {
+                    loader.cancel();
+                }
+                if let Some(cache) = &mut pane.cache {
+                    cache.jump_to(pane.current_index, &pane.image_paths);
+                    if let Some(t) = cache.current_texture_for(pane.current_index) {
+                        pane.current_texture = Some(t);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply slider result to a single pane (independent mode).
+    fn apply_slider_result_one(&mut self, pane_idx: usize, result: SliderResult, ctx: &egui::Context) {
+        if let Some(idx) = result.target {
+            if let Some(pane) = self.panes.get_mut(pane_idx) {
+                let clamped = idx.min(pane.image_paths.len().saturating_sub(1));
+                if clamped != pane.current_index {
+                    pane.current_index = clamped;
+                    pane.zoom = 1.0;
+                    pane.pan = egui::Vec2::ZERO;
+
+                    let found_in_cache = pane
+                        .cache
+                        .as_ref()
+                        .and_then(|c| c.current_texture_for(clamped));
+
+                    if let Some(tex) = found_in_cache {
+                        pane.current_texture = Some(tex);
+                        self.perf.record_image_load(0.0);
+                    } else if let Some(loader) = &mut pane.slider_loader {
+                        if loader.should_load() {
+                            pane.load_sync(ctx);
+                            self.perf.record_image_load(0.0);
+                        }
+                    }
+                }
+            }
+            ctx.request_repaint();
+        }
+
+        if result.released {
+            if let Some(pane) = self.panes.get_mut(pane_idx) {
+                if let Some(loader) = &mut pane.slider_loader {
+                    loader.cancel();
+                }
+                if let Some(cache) = &mut pane.cache {
+                    cache.jump_to(pane.current_index, &pane.image_paths);
+                    if let Some(t) = cache.current_texture_for(pane.current_index) {
+                        pane.current_texture = Some(t);
+                    }
+                }
+            }
         }
     }
 
@@ -132,7 +306,7 @@ impl App {
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let (home, end, shift, nav_right_pressed, nav_left_pressed,
              nav_right_held, nav_left_held, toggle_dual, set_single, set_dual,
-             toggle_footer, open_folder, open_file, close, quit) =
+             set_independent, toggle_footer, open_folder, open_file, close, quit) =
             ctx.input(|i| {
                 (
                     i.key_pressed(egui::Key::Home),
@@ -145,6 +319,7 @@ impl App {
                     i.key_pressed(egui::Key::Tab),
                     i.key_pressed(egui::Key::Num1) && i.modifiers.command,
                     i.key_pressed(egui::Key::Num2) && i.modifiers.command,
+                    i.key_pressed(egui::Key::Num3) && i.modifiers.command,
                     i.key_pressed(egui::Key::Tab),
                     i.key_pressed(egui::Key::O) && i.modifiers.command && i.modifiers.shift,
                     i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift,
@@ -184,8 +359,14 @@ impl App {
             self.set_single_pane();
             return;
         }
-        if set_dual && self.panes.len() == 1 {
+        if set_dual {
             self.set_dual_pane(ctx);
+            self.dual_pane_mode = DualPaneMode::Synced;
+            return;
+        }
+        if set_independent {
+            self.set_dual_pane(ctx);
+            self.dual_pane_mode = DualPaneMode::Independent;
             return;
         }
 
@@ -292,6 +473,11 @@ impl App {
     }
 
     fn show_slider_panel(&mut self, ctx: &egui::Context) {
+        // In independent dual-pane mode, sliders are rendered per-pane
+        if self.panes.len() >= 2 && self.dual_pane_mode == DualPaneMode::Independent {
+            return;
+        }
+
         let max_images = self
             .panes
             .iter()
@@ -302,118 +488,30 @@ impl App {
             return;
         }
 
-        // Use the first pane that has images for the slider position
         let current_idx = self
             .panes
             .iter()
             .find(|p| !p.image_paths.is_empty())
             .map_or(0, |p| p.current_index);
-        let mut slider_target = None;
-        let mut slider_released = false;
 
-        egui::TopBottomPanel::bottom("nav").show(ctx, |ui| {
-            let mut idx = current_idx;
-            let max = max_images - 1;
+        let accent = self.theme.accent;
+        let result = egui::TopBottomPanel::bottom("nav")
+            .show(ctx, |ui| paint_nav_slider(ui, current_idx, max_images, accent))
+            .inner;
 
-            // Custom slider: accent handle + two-tone rail (full width)
-            let slider_width = ui.available_width();
-            let thickness = ui
-                .text_style_height(&egui::TextStyle::Body)
-                .max(ui.spacing().interact_size.y);
-            let (rect, response) =
-                ui.allocate_exact_size(egui::vec2(slider_width, thickness), egui::Sense::drag());
-
-            let handle_radius = rect.height() / 2.5;
-            let rail_radius = 4.0_f32;
-            let cy = rect.center().y;
-            let handle_range =
-                (rect.left() + handle_radius)..=(rect.right() - handle_radius);
-
-            // Handle dragging
-            if let Some(pos) = response.interact_pointer_pos() {
-                let usable = rect.x_range().shrink(handle_radius);
-                let drag_t =
-                    ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
-                idx = (max as f32 * drag_t).round() as usize;
-                if idx != current_idx {
-                    slider_target = Some(idx);
-                }
-            }
-            if response.drag_stopped() {
-                slider_released = true;
-            }
-
-            // Paint: unfilled rail → filled rail → handle (back to front)
-            let rail = egui::Rect::from_min_max(
-                egui::pos2(rect.left(), cy - rail_radius),
-                egui::pos2(rect.right(), cy + rail_radius),
-            );
-            let t = if max > 0 { idx as f32 / max as f32 } else { 0.0 };
-            let handle_x = egui::lerp(handle_range, t);
-
-            ui.painter()
-                .rect_filled(rail, rail_radius, egui::Color32::from_gray(60));
-            let filled =
-                egui::Rect::from_min_max(rail.min, egui::pos2(handle_x, rail.max.y));
-            ui.painter()
-                .rect_filled(filled, rail_radius, self.theme.accent);
-            ui.painter().circle(
-                egui::pos2(handle_x, cy),
-                handle_radius,
-                self.theme.accent,
-                egui::Stroke::NONE,
-            );
-        });
-
-        if let Some(idx) = slider_target {
-            for pane in &mut self.panes {
-                let clamped = idx.min(pane.image_paths.len().saturating_sub(1));
-                if clamped != pane.current_index {
-                    pane.current_index = clamped;
-                    pane.zoom = 1.0;
-                    pane.pan = egui::Vec2::ZERO;
-
-                    // Try the sliding window cache first (free if already cached)
-                    let found_in_cache = pane
-                        .cache
-                        .as_ref()
-                        .and_then(|c| c.current_texture_for(clamped));
-
-                    if let Some(tex) = found_in_cache {
-                        pane.current_texture = Some(tex);
-                        self.perf.record_image_load(0.0);
-                    } else if let Some(loader) = &mut pane.slider_loader {
-                        // Throttled sync decode — like iced, only decode when
-                        // enough time has passed. Previous texture stays on screen.
-                        if loader.should_load() {
-                            pane.load_sync(ctx);
-                            self.perf.record_image_load(0.0);
-                        }
-                    }
-                }
-            }
-            ctx.request_repaint();
-        }
-
-        if slider_released {
-            for pane in &mut self.panes {
-                if let Some(loader) = &mut pane.slider_loader {
-                    loader.cancel();
-                }
-                if let Some(cache) = &mut pane.cache {
-                    cache.jump_to(pane.current_index, &pane.image_paths);
-                    if let Some(t) = cache.current_texture_for(pane.current_index) {
-                        pane.current_texture = Some(t);
-                    }
-                }
-            }
-        }
+        self.apply_slider_result_all(result, ctx);
     }
 
     fn show_central_panel(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default()
+        let independent =
+            self.panes.len() >= 2 && self.dual_pane_mode == DualPaneMode::Independent;
+        let accent = self.theme.accent;
+
+        let slider_results = egui::CentralPanel::default()
             .frame(egui::Frame::default().fill(egui::Color32::from_gray(20)))
             .show(ctx, |ui| {
+                let mut results: Vec<(usize, SliderResult)> = Vec::new();
+
                 if self.panes.len() <= 1 {
                     if let Some(pane) = self.panes.first_mut() {
                         pane.show_content(ui);
@@ -421,19 +519,31 @@ impl App {
                 } else {
                     let available = ui.available_rect_before_wrap();
                     let divider_w = 4.0;
-                    let grab_w = 12.0; // wider hit area for easy grabbing
+                    let grab_w = 12.0;
                     let left_w = (available.width() - divider_w) * self.divider_fraction;
+
+                    // Reserve space for per-pane sliders in independent mode
+                    let slider_h = if independent {
+                        ui.text_style_height(&egui::TextStyle::Body)
+                            .max(ui.spacing().interact_size.y)
+                    } else {
+                        0.0
+                    };
+
+                    let content_h = available.height() - slider_h;
+                    let right_x = available.min.x + left_w + divider_w;
+                    let right_w = available.width() - left_w - divider_w;
 
                     let left_rect = egui::Rect::from_min_size(
                         available.min,
-                        egui::vec2(left_w, available.height()),
+                        egui::vec2(left_w, content_h),
                     );
                     let right_rect = egui::Rect::from_min_size(
-                        egui::pos2(available.min.x + left_w + divider_w, available.min.y),
-                        egui::vec2(available.width() - left_w - divider_w, available.height()),
+                        egui::pos2(right_x, available.min.y),
+                        egui::vec2(right_w, content_h),
                     );
 
-                    // Divider interaction — wide grab area centered on the visual line
+                    // Divider interaction
                     let divider_center_x = available.min.x + left_w + divider_w / 2.0;
                     let grab_rect = egui::Rect::from_center_size(
                         egui::pos2(divider_center_x, available.center().y),
@@ -450,18 +560,13 @@ impl App {
                                 (self.divider_fraction + delta / usable).clamp(0.1, 0.9);
                         }
                     }
-
-                    // Double-click resets to 50/50
                     if divider_response.double_clicked() {
                         self.divider_fraction = 0.5;
                     }
-
-                    // Resize cursor when hovering or dragging
                     if divider_response.hovered() || divider_response.dragged() {
                         ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                     }
 
-                    // Visual divider line — highlighted when interacting
                     let divider_color = if divider_response.dragged() {
                         egui::Color32::from_gray(140)
                     } else if divider_response.hovered() {
@@ -476,6 +581,8 @@ impl App {
                     );
 
                     let (first, rest) = self.panes.split_at_mut(1);
+
+                    // Pane images
                     ui.allocate_new_ui(
                         egui::UiBuilder::new().max_rect(left_rect),
                         |ui| first[0].show_content(ui),
@@ -484,8 +591,58 @@ impl App {
                         egui::UiBuilder::new().max_rect(right_rect),
                         |ui| rest[0].show_content(ui),
                     );
+
+                    // Per-pane sliders (independent mode)
+                    if independent {
+                        let slider_y = available.max.y - slider_h;
+
+                        let left_slider_rect = egui::Rect::from_min_size(
+                            egui::pos2(available.min.x, slider_y),
+                            egui::vec2(left_w, slider_h),
+                        );
+                        let left_result = ui
+                            .allocate_new_ui(
+                                egui::UiBuilder::new().max_rect(left_slider_rect),
+                                |ui| {
+                                    paint_nav_slider(
+                                        ui,
+                                        first[0].current_index,
+                                        first[0].image_paths.len(),
+                                        accent,
+                                    )
+                                },
+                            )
+                            .inner;
+                        results.push((0, left_result));
+
+                        let right_slider_rect = egui::Rect::from_min_size(
+                            egui::pos2(right_x, slider_y),
+                            egui::vec2(right_w, slider_h),
+                        );
+                        let right_result = ui
+                            .allocate_new_ui(
+                                egui::UiBuilder::new().max_rect(right_slider_rect),
+                                |ui| {
+                                    paint_nav_slider(
+                                        ui,
+                                        rest[0].current_index,
+                                        rest[0].image_paths.len(),
+                                        accent,
+                                    )
+                                },
+                            )
+                            .inner;
+                        results.push((1, right_result));
+                    }
                 }
-            });
+
+                results
+            })
+            .inner;
+
+        for (pane_idx, result) in slider_results {
+            self.apply_slider_result_one(pane_idx, result, ctx);
+        }
     }
 }
 
@@ -529,6 +686,7 @@ impl eframe::App for App {
         let action = menu::show_menu_bar(
             ctx,
             &self.panes,
+            self.dual_pane_mode,
             &mut self.settings,
             &self.theme,
             fps_text.as_deref(),

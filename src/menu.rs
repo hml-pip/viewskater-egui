@@ -1,5 +1,6 @@
 use eframe::egui;
 
+use crate::app::DualPaneMode;
 use crate::pane::Pane;
 use crate::settings::AppSettings;
 use crate::theme::UiTheme;
@@ -92,6 +93,7 @@ fn hover_row(
 pub fn show_menu_bar(
     ctx: &egui::Context,
     panes: &[Pane],
+    dual_pane_mode: DualPaneMode,
     settings: &mut AppSettings,
     theme: &UiTheme,
     fps_text: Option<&str>,
@@ -173,18 +175,29 @@ pub fn show_menu_bar(
             ui.menu_button("View", |ui| {
                 let (ml, mw) = setup_menu_hover(ui);
                 let pane_count = panes.len();
+                let is_single = pane_count == 1;
+                let is_synced = pane_count >= 2 && dual_pane_mode == DualPaneMode::Synced;
+                let is_independent = pane_count >= 2 && dual_pane_mode == DualPaneMode::Independent;
                 hover_row(ui, "single_pane", theme, ml, mw, |ui| {
-                    if ui.radio(pane_count == 1, "Single Pane  Ctrl+1").clicked() {
-                        if pane_count != 1 {
+                    if ui.radio(is_single, "Single Pane  Ctrl+1").clicked() {
+                        if !is_single {
                             action = MenuAction::SetSinglePane;
                         }
                         ui.close_menu();
                     }
                 });
-                hover_row(ui, "dual_pane", theme, ml, mw, |ui| {
-                    if ui.radio(pane_count >= 2, "Dual Pane  Ctrl+2").clicked() {
-                        if pane_count < 2 {
+                hover_row(ui, "dual_synced", theme, ml, mw, |ui| {
+                    if ui.radio(is_synced, "Dual Pane (Synced)  Ctrl+2").clicked() {
+                        if !is_synced {
                             action = MenuAction::SetDualPane;
+                        }
+                        ui.close_menu();
+                    }
+                });
+                hover_row(ui, "dual_independent", theme, ml, mw, |ui| {
+                    if ui.radio(is_independent, "Dual Pane (Independent)  Ctrl+3").clicked() {
+                        if !is_independent {
+                            action = MenuAction::SetDualPaneIndependent;
                         }
                         ui.close_menu();
                     }
@@ -319,6 +332,7 @@ pub enum MenuAction {
     Quit,
     SetSinglePane,
     SetDualPane,
+    SetDualPaneIndependent,
     ShowAbout,
     ShowSettings,
 }
