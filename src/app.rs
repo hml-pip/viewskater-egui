@@ -698,7 +698,7 @@ impl eframe::App for App {
 
         // Footer (bottom, before slider so it's below the slider)
         if self.settings.show_footer {
-            menu::show_footer(ctx, &self.panes);
+            menu::show_footer(ctx, &self.panes, self.divider_fraction);
         }
 
         // Slider panel (bottom)

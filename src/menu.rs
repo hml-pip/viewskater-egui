@@ -252,64 +252,105 @@ pub fn show_menu_bar(
     action
 }
 
-pub fn show_footer(ctx: &egui::Context, panes: &[Pane]) {
+pub fn show_footer(ctx: &egui::Context, panes: &[Pane], divider_fraction: f32) {
     egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            if let Some(pane) = panes.first() {
-                if let Some(path) = pane.image_paths.get(pane.current_index) {
-                    // Filename
-                    let name = path.file_name().unwrap_or_default().to_string_lossy();
-                    ui.label(
-                        egui::RichText::new(name.as_ref())
-                            .monospace()
-                            .color(egui::Color32::from_gray(200))
-                            .size(13.0),
-                    );
+        if panes.len() >= 2 {
+            let available = ui.available_rect_before_wrap();
+            let divider_w = 4.0;
+            let left_w = (available.width() - divider_w) * divider_fraction;
+            let right_x = available.min.x + left_w + divider_w;
+            let right_w = available.width() - left_w - divider_w;
 
-                    // Resolution (from current texture)
-                    if let Some(tex) = &pane.current_texture {
-                        let size = tex.size();
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format!("{}x{}", size[0], size[1]))
-                                .monospace()
-                                .color(egui::Color32::from_gray(160))
-                                .size(13.0),
-                        );
-                    }
+            let pad = 4.0;
+            let left_rect = egui::Rect::from_min_size(
+                available.min,
+                egui::vec2(left_w - pad, available.height()),
+            );
+            let right_rect = egui::Rect::from_min_size(
+                egui::pos2(right_x + pad, available.min.y),
+                egui::vec2(right_w - pad, available.height()),
+            );
 
-                    // File size
-                    if let Ok(meta) = std::fs::metadata(path) {
-                        ui.separator();
-                        ui.label(
-                            egui::RichText::new(format_file_size(meta.len()))
-                                .monospace()
-                                .color(egui::Color32::from_gray(160))
-                                .size(13.0),
-                        );
-                    }
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(left_rect), |ui| {
+                paint_pane_footer(ui, &panes[0]);
+            });
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_rect), |ui| {
+                paint_pane_footer(ui, &panes[1]);
+            });
 
-                    // Image index (right-aligned)
-                    if !pane.image_paths.is_empty() {
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} / {}",
-                                        pane.current_index + 1,
-                                        pane.image_paths.len()
-                                    ))
-                                    .monospace()
-                                    .color(egui::Color32::from_gray(200))
-                                    .size(13.0),
-                                );
-                            },
-                        );
-                    }
+            // Divider line matching the central panel
+            let divider_center_x = available.min.x + left_w + divider_w / 2.0;
+            ui.painter().vline(
+                divider_center_x,
+                available.y_range(),
+                egui::Stroke::new(divider_w, egui::Color32::from_gray(60)),
+            );
+        } else {
+            ui.horizontal(|ui| {
+                if let Some(pane) = panes.first() {
+                    paint_pane_footer(ui, pane);
                 }
-            }
-        });
+            });
+        }
+    });
+}
+
+fn paint_pane_footer(ui: &mut egui::Ui, pane: &Pane) {
+    ui.horizontal(|ui| {
+        let Some(path) = pane.image_paths.get(pane.current_index) else {
+            return;
+        };
+
+        // Filename
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        ui.label(
+            egui::RichText::new(name.as_ref())
+                .monospace()
+                .color(egui::Color32::from_gray(200))
+                .size(13.0),
+        );
+
+        // Resolution
+        if let Some(tex) = &pane.current_texture {
+            let size = tex.size();
+            ui.separator();
+            ui.label(
+                egui::RichText::new(format!("{}x{}", size[0], size[1]))
+                    .monospace()
+                    .color(egui::Color32::from_gray(160))
+                    .size(13.0),
+            );
+        }
+
+        // File size
+        if let Ok(meta) = std::fs::metadata(path) {
+            ui.separator();
+            ui.label(
+                egui::RichText::new(format_file_size(meta.len()))
+                    .monospace()
+                    .color(egui::Color32::from_gray(160))
+                    .size(13.0),
+            );
+        }
+
+        // Image index (right-aligned)
+        if !pane.image_paths.is_empty() {
+            ui.with_layout(
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{} / {}",
+                            pane.current_index + 1,
+                            pane.image_paths.len()
+                        ))
+                        .monospace()
+                        .color(egui::Color32::from_gray(200))
+                        .size(13.0),
+                    );
+                },
+            );
+        }
     });
 }
 
