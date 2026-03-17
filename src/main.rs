@@ -22,14 +22,31 @@ struct Args {
     paths: Vec<PathBuf>,
 }
 
+fn load_icon() -> Option<egui::IconData> {
+    static ICON: &[u8] = include_bytes!("../assets/icon_256.png");
+    let img = image::load_from_memory(ICON).ok()?.into_rgba8();
+    let (w, h) = img.dimensions();
+    Some(egui::IconData {
+        rgba: img.into_raw(),
+        width: w,
+        height: h,
+    })
+}
+
 fn main() -> eframe::Result {
     env_logger::init();
     let args = Args::parse();
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1280.0, 720.0])
+        .with_drag_and_drop(true);
+
+    if let Some(icon) = load_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
+
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280.0, 720.0])
-            .with_drag_and_drop(true),
+        viewport,
         ..Default::default()
     };
 
