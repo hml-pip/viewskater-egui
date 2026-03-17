@@ -16,6 +16,10 @@ const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 
 /// Cursor proximity zones for revealing UI in fullscreen mode (logical pixels).
+/// macOS/Windows need a larger top zone for menu interactions in fullscreen.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+const FULLSCREEN_TOP_ZONE: f32 = 200.0;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const FULLSCREEN_TOP_ZONE: f32 = 50.0;
 const FULLSCREEN_BOTTOM_ZONE: f32 = 100.0;
 
