@@ -96,6 +96,7 @@ pub(crate) fn show_menu_bar(
     settings: &mut AppSettings,
     theme: &UiTheme,
     fps_text: Option<&str>,
+    is_fullscreen: bool,
 ) -> MenuAction {
     let mut action = MenuAction::None;
     let is_dual = panes.len() >= 2;
@@ -223,6 +224,17 @@ pub(crate) fn show_menu_bar(
                 hover_row(ui, theme, ml, mw, |ui| {
                     if ui.button("Reset Zoom/Pan").clicked() {
                         action = MenuAction::ResetZoom;
+                        ui.close_menu();
+                    }
+                });
+                hover_row(ui, theme, ml, mw, |ui| {
+                    let label = if is_fullscreen {
+                        "Exit Fullscreen  F11"
+                    } else {
+                        "Fullscreen  F11"
+                    };
+                    if ui.button(label).clicked() {
+                        action = MenuAction::ToggleFullscreen;
                         ui.close_menu();
                     }
                 });
@@ -441,6 +453,7 @@ pub(crate) enum MenuAction {
     SetDualPane,
     SetDualPaneIndependent,
     ResetZoom,
+    ToggleFullscreen,
     ShowAbout,
     ShowSettings,
 }

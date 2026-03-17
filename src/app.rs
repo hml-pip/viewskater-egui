@@ -101,6 +101,7 @@ pub struct App {
     pub(crate) theme: UiTheme,
     pub(crate) show_settings: bool,
     pub(crate) show_about: bool,
+    pub(crate) is_fullscreen: bool,
     initial_size_set: bool,
 }
 
@@ -118,6 +119,7 @@ impl App {
             theme,
             show_settings: false,
             show_about: false,
+            is_fullscreen: false,
             initial_size_set: false,
         };
 
@@ -439,33 +441,38 @@ impl eframe::App for App {
         self.handle_keyboard(ctx);
         self.update_title(ctx);
 
-        // Menu bar (top)
-        let fps_text = if self.settings.show_fps {
-            Some(self.perf.fps_text())
-        } else {
-            None
-        };
-        let settings_snapshot = self.settings.clone();
-        let action = menu::show_menu_bar(
-            ctx,
-            &self.panes,
-            self.dual_pane_mode,
-            &mut self.settings,
-            &self.theme,
-            fps_text.as_deref(),
-        );
-        if self.settings != settings_snapshot {
-            self.settings.save();
+        // Menu bar (top) — hidden in fullscreen
+        if !self.is_fullscreen {
+            let fps_text = if self.settings.show_fps {
+                Some(self.perf.fps_text())
+            } else {
+                None
+            };
+            let settings_snapshot = self.settings.clone();
+            let action = menu::show_menu_bar(
+                ctx,
+                &self.panes,
+                self.dual_pane_mode,
+                &mut self.settings,
+                &self.theme,
+                fps_text.as_deref(),
+                self.is_fullscreen,
+            );
+            if self.settings != settings_snapshot {
+                self.settings.save();
+            }
+            self.handle_menu_action(action, ctx);
         }
-        self.handle_menu_action(action, ctx);
 
-        // Footer (bottom, before slider so it's below the slider)
-        if self.settings.show_footer {
+        // Footer (bottom, before slider so it's below the slider) — hidden in fullscreen
+        if self.settings.show_footer && !self.is_fullscreen {
             menu::show_footer(ctx, &self.panes, self.divider_fraction);
         }
 
-        // Slider panel (bottom)
-        self.show_slider_panel(ctx);
+        // Slider panel (bottom) — hidden in fullscreen
+        if !self.is_fullscreen {
+            self.show_slider_panel(ctx);
+        }
 
         // Central panel (must be last — fills remaining space)
         self.show_central_panel(ctx);

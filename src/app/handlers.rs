@@ -72,6 +72,7 @@ impl App {
                     pane.pan = egui::Vec2::ZERO;
                 }
             }
+            MenuAction::ToggleFullscreen => self.toggle_fullscreen(ctx),
             MenuAction::ShowAbout => self.show_about = true,
             MenuAction::ShowSettings => self.show_settings = true,
         }
@@ -133,11 +134,17 @@ impl App {
         }
     }
 
+    pub(super) fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
+        self.is_fullscreen = !self.is_fullscreen;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.is_fullscreen));
+    }
+
     pub(super) fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let (home, end, shift, nav_right_pressed, nav_left_pressed,
              nav_right_held, nav_left_held, set_single, set_dual,
              set_independent, select_pane1, select_pane2,
-             toggle_footer, open_folder, open_file, close, quit) =
+             toggle_footer, open_folder, open_file, close, quit,
+             toggle_fullscreen, escape) =
             ctx.input(|i| {
                 (
                     i.key_pressed(egui::Key::Home),
@@ -157,11 +164,21 @@ impl App {
                     i.key_pressed(egui::Key::O) && i.modifiers.command && !i.modifiers.shift,
                     i.key_pressed(egui::Key::W) && i.modifiers.command,
                     i.key_pressed(egui::Key::Q) && i.modifiers.command,
+                    i.key_pressed(egui::Key::F11),
+                    i.key_pressed(egui::Key::Escape),
                 )
             });
 
         if quit {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if toggle_fullscreen {
+            self.toggle_fullscreen(ctx);
+            return;
+        }
+        if escape && self.is_fullscreen {
+            self.toggle_fullscreen(ctx);
             return;
         }
         if open_folder {
