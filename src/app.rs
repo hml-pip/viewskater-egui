@@ -15,6 +15,10 @@ use crate::theme::UiTheme;
 const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 
+/// Cursor proximity zones for revealing UI in fullscreen mode (logical pixels).
+const FULLSCREEN_TOP_ZONE: f32 = 50.0;
+const FULLSCREEN_BOTTOM_ZONE: f32 = 100.0;
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum DualPaneMode {
     Synced,
@@ -441,9 +445,27 @@ impl eframe::App for App {
         self.handle_keyboard(ctx);
         self.update_title(ctx);
 
-        // Menu bar (top) — hidden in fullscreen
-        if !self.is_fullscreen {
-            let fps_text = if self.settings.show_fps {
+        // Detect cursor proximity to screen edges for fullscreen UI reveal
+        let (cursor_near_top, cursor_near_bottom) = if self.is_fullscreen {
+            let screen = ctx.screen_rect();
+            ctx.input(|i| {
+                if let Some(pos) = i.pointer.hover_pos() {
+                    (
+                        pos.y - screen.min.y < FULLSCREEN_TOP_ZONE,
+                        screen.max.y - pos.y < FULLSCREEN_BOTTOM_ZONE,
+                    )
+                } else {
+                    (false, false)
+                }
+            })
+        } else {
+            (false, false)
+        };
+
+        // Menu bar (top) — in fullscreen, revealed when cursor near top edge
+        let show_menu = !self.is_fullscreen || cursor_near_top;
+        if show_menu {
+            let fps_text = if self.settings.show_fps && !self.is_fullscreen {
                 Some(self.perf.fps_text())
             } else {
                 None
@@ -464,18 +486,44 @@ impl eframe::App for App {
             self.handle_menu_action(action, ctx);
         }
 
-        // Footer (bottom, before slider so it's below the slider) — hidden in fullscreen
-        if self.settings.show_footer && !self.is_fullscreen {
+        // Footer — in fullscreen, revealed when cursor near bottom edge
+        if self.settings.show_footer && (!self.is_fullscreen || cursor_near_bottom) {
             menu::show_footer(ctx, &self.panes, self.divider_fraction);
         }
 
-        // Slider panel (bottom) — hidden in fullscreen
-        if !self.is_fullscreen {
+        // Slider panel — in fullscreen, revealed when cursor near bottom edge
+        if !self.is_fullscreen || cursor_near_bottom {
             self.show_slider_panel(ctx);
         }
 
         // Central panel (must be last — fills remaining space)
         self.show_central_panel(ctx);
+
+        // FPS overlay in fullscreen (painted over central panel, top-right corner)
+        if self.is_fullscreen && self.settings.show_fps {
+            let fps = self.perf.fps_text();
+            let screen = ctx.screen_rect();
+            let font = egui::FontId::monospace(14.0);
+            let color = egui::Color32::from_rgba_unmultiplied(220, 220, 220, 200);
+            let bg = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140);
+            let galley = ctx.fonts(|f| f.layout_no_wrap(fps, font, color));
+            let text_size = galley.size();
+            let margin = 8.0;
+            let pos = egui::pos2(
+                screen.max.x - text_size.x - margin * 2.0,
+                screen.min.y + margin,
+            );
+            let bg_rect = egui::Rect::from_min_size(
+                pos,
+                text_size + egui::vec2(margin * 2.0, margin),
+            );
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("fullscreen_fps"),
+            ));
+            painter.rect_filled(bg_rect, 4.0, bg);
+            painter.galley(pos + egui::vec2(margin, margin * 0.5), galley, color);
+        }
 
         // Overlays
         if self.settings.show_cache_overlay {
