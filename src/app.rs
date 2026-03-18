@@ -16,10 +16,6 @@ const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
 const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 
 /// Cursor proximity zones for revealing UI in fullscreen mode (logical pixels).
-/// macOS/Windows need a larger top zone for menu interactions in fullscreen.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-const FULLSCREEN_TOP_ZONE: f32 = 200.0;
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const FULLSCREEN_TOP_ZONE: f32 = 50.0;
 const FULLSCREEN_BOTTOM_ZONE: f32 = 100.0;
 
@@ -110,6 +106,7 @@ pub struct App {
     pub(crate) show_settings: bool,
     pub(crate) show_about: bool,
     pub(crate) is_fullscreen: bool,
+    pub(crate) menu_open: bool,
     initial_size_set: bool,
 }
 
@@ -128,6 +125,7 @@ impl App {
             show_settings: false,
             show_about: false,
             is_fullscreen: false,
+            menu_open: false,
             initial_size_set: false,
         };
 
@@ -467,7 +465,8 @@ impl eframe::App for App {
         };
 
         // Menu bar (top) — in fullscreen, revealed when cursor near top edge
-        let show_menu = !self.is_fullscreen || cursor_near_top;
+        // or when a menu dropdown is open (so user can interact with items)
+        let show_menu = !self.is_fullscreen || cursor_near_top || self.menu_open;
         if show_menu {
             let fps_text = if self.settings.show_fps && !self.is_fullscreen {
                 Some(self.perf.fps_text())
@@ -475,7 +474,7 @@ impl eframe::App for App {
                 None
             };
             let settings_snapshot = self.settings.clone();
-            let action = menu::show_menu_bar(
+            let (action, menu_is_open) = menu::show_menu_bar(
                 ctx,
                 &self.panes,
                 self.dual_pane_mode,
@@ -484,10 +483,13 @@ impl eframe::App for App {
                 fps_text.as_deref(),
                 self.is_fullscreen,
             );
+            self.menu_open = menu_is_open;
             if self.settings != settings_snapshot {
                 self.settings.save();
             }
             self.handle_menu_action(action, ctx);
+        } else {
+            self.menu_open = false;
         }
 
         // Footer — in fullscreen, revealed when cursor near bottom edge

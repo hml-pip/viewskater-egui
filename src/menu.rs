@@ -89,6 +89,8 @@ fn hover_row(
     }
 }
 
+/// Returns (MenuAction, menu_is_open) so fullscreen mode can keep the bar visible
+/// while the user interacts with a dropdown.
 pub(crate) fn show_menu_bar(
     ctx: &egui::Context,
     panes: &[Pane],
@@ -97,8 +99,9 @@ pub(crate) fn show_menu_bar(
     theme: &UiTheme,
     fps_text: Option<&str>,
     is_fullscreen: bool,
-) -> MenuAction {
+) -> (MenuAction, bool) {
     let mut action = MenuAction::None;
+    let mut menu_is_open = false;
     let is_dual = panes.len() >= 2;
     let has_images = panes.first().is_some_and(|p| !p.image_paths.is_empty());
 
@@ -114,7 +117,8 @@ pub(crate) fn show_menu_bar(
         let show_view = total_w >= menu_unit * 3.0;
         let show_help = total_w >= menu_unit * 4.0;
 
-        egui::menu::bar(ui, |ui| {
+        let bar_id = egui::menu::bar(ui, |ui| {
+            let bar_id = ui.id();
             ui.menu_button(file_label, |ui| {
                 let (ml, mw) = setup_menu_hover(ui);
                 hover_row(ui, theme, ml, mw, |ui| {
@@ -293,10 +297,12 @@ pub(crate) fn show_menu_bar(
                     }
                 });
             }
-        });
+            bar_id
+        }).inner;
+        menu_is_open = egui::menu::BarState::load(ctx, bar_id).is_some();
     });
 
-    action
+    (action, menu_is_open)
 }
 
 pub(crate) fn show_footer(ctx: &egui::Context, panes: &[Pane], divider_fraction: f32) {
