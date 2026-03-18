@@ -34,3 +34,25 @@ Set `RUST_LOG=viewskater_egui=debug` for debug logging.
 | Click + drag | Pan |
 | Double-click | Reset zoom and pan |
 | Slider | Jump to position |
+| F11 / Escape | Toggle / exit fullscreen |
+
+## Linux Desktop Integration
+
+On GNOME 46+ (Ubuntu 24.04+), the taskbar icon requires a `.desktop` file and icon installed to standard XDG locations. Without this, GNOME shows a generic gear icon.
+
+```bash
+# Install icon
+mkdir -p ~/.local/share/icons/hicolor/256x256/apps
+cp assets/icon_256.png ~/.local/share/icons/hicolor/256x256/apps/viewskater-egui.png
+gtk-update-icon-cache -f ~/.local/share/icons/hicolor/
+
+# Install desktop entry (edit Exec= path to match your setup)
+cp assets/viewskater-egui.desktop ~/.local/share/applications/
+```
+
+If using the AppImage, update the `Exec=` line to point to the AppImage path:
+
+```bash
+sed -i "s|Exec=.*|Exec=/path/to/viewskater-egui.AppImage %f|" \
+    ~/.local/share/applications/viewskater-egui.desktop
+```

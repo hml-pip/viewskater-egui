@@ -39,7 +39,8 @@ fn main() -> eframe::Result {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1280.0, 720.0])
-        .with_drag_and_drop(true);
+        .with_drag_and_drop(true)
+        .with_app_id("viewskater-egui");
 
     if let Some(icon) = load_icon() {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
