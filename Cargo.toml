@@ -34,6 +34,15 @@ chrono = "0.4"
 winit = { git = "https://github.com/ggand0/winit.git", branch = "custom-dnd-0.30.13" }
 egui-winit = { git = "https://github.com/ggand0/egui-winit-custom.git", branch = "main" }
 
+[package.metadata.appimage]
+icon = "./assets/icon_256.png"
+
+[package.metadata.bundle]
+name = "ViewSkater"
+identifier = "com.ggando.viewskater-egui"
+icon = ["assets/ViewSkater.icns"]
+short_description = "A fast image viewer built with egui"
+
 [profile.opt-dev]
 inherits = "release"
 opt-level = 3

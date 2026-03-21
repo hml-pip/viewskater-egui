@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=ViewSkater
+Exec=viewskater-egui %f
+Icon=viewskater-egui
+Type=Application
+Categories=Graphics;Viewer;
+StartupWMClass=viewskater-egui
+MimeType=image/png;image/jpeg;image/webp;image/tiff;image/bmp;
