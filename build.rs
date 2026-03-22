@@ -1,6 +1,7 @@
-use std::{env, process::Command};
+use std::{env, io, process::Command};
+use winres::WindowsResource;
 
-fn main() {
+fn main() -> io::Result<()> {
     // Build timestamp
     let timestamp = chrono::Utc::now().format("%Y%m%d.%H%M%S").to_string();
     println!("cargo:rustc-env=BUILD_TIMESTAMP={}", timestamp);
@@ -39,4 +40,13 @@ fn main() {
     // Rerun if git changes
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs/heads/");
+
+    // Embed icon and version info into Windows executable
+    if env::var_os("CARGO_CFG_WINDOWS").is_some() {
+        WindowsResource::new()
+            .set_icon("./assets/icon.ico")
+            .compile()?;
+    }
+
+    Ok(())
 }
