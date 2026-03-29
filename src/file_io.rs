@@ -77,13 +77,18 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for BufferLayer {
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
         let metadata = event.metadata();
-        if !metadata.target().starts_with("viewskater_egui") {
+
+        let mut visitor = MessageVisitor::default();
+        event.record(&mut visitor);
+
+        // For tracing-log bridged events, metadata.target() is "log";
+        // the real target is in the "log.target" field.
+        let target = visitor.log_target.as_deref().unwrap_or(metadata.target());
+        if !target.starts_with("viewskater_egui") {
             return;
         }
 
-        let mut visitor = MessageVisitor(String::new());
-        event.record(&mut visitor);
-        let message = format!("{:<5} {}", metadata.level(), visitor.0);
+        let message = format!("{:<5} {}", metadata.level(), visitor.message);
 
         let mut buf = self.buffer.lock().unwrap();
         if buf.len() == MAX_LOG_LINES {
@@ -93,18 +98,24 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for BufferLayer {
     }
 }
 
-struct MessageVisitor(String);
+#[derive(Default)]
+struct MessageVisitor {
+    message: String,
+    log_target: Option<String>,
+}
 
 impl tracing::field::Visit for MessageVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         if field.name() == "message" {
-            self.0 = format!("{:?}", value);
+            self.message = format!("{:?}", value);
         }
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        if field.name() == "message" {
-            self.0 = value.to_string();
+        match field.name() {
+            "message" => self.message = value.to_string(),
+            "log.target" => self.log_target = Some(value.to_string()),
+            _ => {}
         }
     }
 }
@@ -117,8 +128,7 @@ pub fn setup_logger() -> Arc<Mutex<VecDeque<String>>> {
 
     let buffer_layer = BufferLayer {
         buffer: buffer.clone(),
-    }
-    .with_filter(EnvFilter::new("viewskater_egui=debug"));
+    };
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_filter(env_filter))
@@ -185,6 +195,8 @@ pub fn export_and_open_debug_logs(log_buffer: &Arc<Mutex<VecDeque<String>>>) {
                 let _ = writeln!(file, "{}", entry);
             }
             let _ = file.flush();
+            // Drop lock before logging to avoid deadlock (log call re-enters BufferLayer)
+            drop(buffer);
             log::info!("Debug logs exported to: {}", debug_log_path.display());
         }
         Err(e) => {
