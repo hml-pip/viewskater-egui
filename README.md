@@ -1,3 +1,5 @@
+<img src="https://github.com/user-attachments/assets/e48601c5-705a-44c4-8cc7-36f6a6fc422a" alt="Alt text" width="600"/>
+
 # ViewSkater
 
 A fast, cross-platform image viewer built with Rust and egui. Designed for exploring and comparing large sets of images. Linux, macOS and Windows are supported.
