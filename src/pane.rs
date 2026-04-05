@@ -185,6 +185,13 @@ impl Pane {
                 } else {
                     cache.navigate_backward(new_index, &self.image_paths);
                 }
+
+                let dir = if delta > 0 { "→" } else { "←" };
+                log::debug!(
+                    "nav {} {}/{} cache={} hit",
+                    dir, new_index, self.image_paths.len(),
+                    cache.summary(),
+                );
                 return true;
             }
         }
@@ -202,9 +209,16 @@ impl Pane {
         if let Some(cache) = &mut self.cache {
             cache.jump_to(index, &self.image_paths);
             self.current_texture = cache.current_texture_for(index);
-            if self.current_texture.is_none() {
+            let hit = self.current_texture.is_some();
+            let summary = cache.summary();
+            if !hit {
                 self.load_sync(ctx);
             }
+            log::debug!(
+                "jump {}/{} cache={} {}",
+                index, self.image_paths.len(), summary,
+                if hit { "hit" } else { "miss" },
+            );
         } else {
             self.load_sync(ctx);
         }
@@ -278,6 +292,10 @@ impl Pane {
             if let Some(t) = cache.current_texture_for(self.current_index) {
                 self.current_texture = Some(t);
             }
+            log::debug!(
+                "slider release {}/{} cache={}",
+                self.current_index, self.image_paths.len(), cache.summary(),
+            );
         }
     }
 
