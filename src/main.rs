@@ -22,6 +22,10 @@ mod theme;
 struct Args {
     /// Paths to image files or directories
     paths: Vec<PathBuf>,
+
+    /// Rendering backend: "glow" (OpenGL, default) or "wgpu"
+    #[arg(long, default_value = "glow")]
+    renderer: String,
 }
 
 fn load_icon() -> Option<egui::IconData> {
@@ -49,8 +53,14 @@ fn main() -> eframe::Result {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
     }
 
+    let renderer = match args.renderer.as_str() {
+        "wgpu" => eframe::Renderer::Wgpu,
+        _ => eframe::Renderer::Glow,
+    };
+
     let options = eframe::NativeOptions {
         viewport,
+        renderer,
         ..Default::default()
     };
 

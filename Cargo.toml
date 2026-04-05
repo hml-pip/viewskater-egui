@@ -5,7 +5,14 @@ edition = "2021"
 description = "Fast image viewer built with egui"
 
 [dependencies]
-eframe = "0.31"
+eframe = { version = "0.31", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "wgpu",
+    "wayland",
+    "x11",
+] }
 egui = "0.31"
 image = { version = "0.25", default-features = false, features = [
     "jpeg",
