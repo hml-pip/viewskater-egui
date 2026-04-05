@@ -189,6 +189,22 @@ impl SlidingWindowCache {
     }
 
     /// Get the TextureHandle for a given file index, if cached.
+    /// Returns a compact summary of the cache window for debug logging.
+    /// Format: `[first..last] loaded/total inflight=N`
+    pub fn summary(&self) -> String {
+        let last = self.first_file_index + self.slots.len().saturating_sub(1);
+        let loaded = self.slots.iter().filter(|s| s.is_some()).count();
+        let total = self.slots.len();
+        if self.in_flight.is_empty() {
+            format!("[{}..{}] {}/{}", self.first_file_index, last, loaded, total)
+        } else {
+            format!(
+                "[{}..{}] {}/{} inflight={}",
+                self.first_file_index, last, loaded, total, self.in_flight.len()
+            )
+        }
+    }
+
     pub fn current_texture_for(&self, file_index: usize) -> Option<egui::TextureHandle> {
         let slot_idx = file_index.checked_sub(self.first_file_index)?;
         self.slots.get(slot_idx).and_then(|opt| opt.clone())
