@@ -176,7 +176,6 @@ impl Pane {
         }
 
         if let Some(cache) = &mut self.cache {
-            let hit = cache.current_texture_for(new_index).is_some();
             if let Some(t) = cache.current_texture_for(new_index) {
                 self.current_index = new_index;
                 self.current_texture = Some(t);
@@ -189,10 +188,9 @@ impl Pane {
 
                 let dir = if delta > 0 { "→" } else { "←" };
                 log::debug!(
-                    "nav {} {}/{} cache={} {}",
+                    "nav {} {}/{} cache={} hit",
                     dir, new_index, self.image_paths.len(),
                     cache.summary(),
-                    if hit { "hit" } else { "miss" },
                 );
                 return true;
             }
@@ -210,10 +208,10 @@ impl Pane {
 
         if let Some(cache) = &mut self.cache {
             cache.jump_to(index, &self.image_paths);
-            let hit = cache.current_texture_for(index).is_some();
             self.current_texture = cache.current_texture_for(index);
+            let hit = self.current_texture.is_some();
             let summary = cache.summary();
-            if self.current_texture.is_none() {
+            if !hit {
                 self.load_sync(ctx);
             }
             log::debug!(
