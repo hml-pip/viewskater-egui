@@ -294,6 +294,10 @@ impl Pane {
             if let Some(t) = cache.current_texture_for(self.current_index) {
                 self.current_texture = Some(t);
             }
+            log::debug!(
+                "slider release {}/{} cache={}",
+                self.current_index, self.image_paths.len(), cache.summary(),
+            );
         }
     }
 
