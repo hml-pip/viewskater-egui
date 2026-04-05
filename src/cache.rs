@@ -204,6 +204,18 @@ impl SlidingWindowCache {
         }
     }
 
+    /// Total bytes of loaded textures in the sliding window.
+    pub fn total_bytes(&self) -> usize {
+        self.slots.iter().filter_map(|s| s.as_ref()).map(|tex| {
+            let size = tex.size();
+            size[0] * size[1] * 4
+        }).sum()
+    }
+
+    pub fn total_mb(&self) -> f64 {
+        self.total_bytes() as f64 / (1024.0 * 1024.0)
+    }
+
     /// Get the TextureHandle for a given file index, if cached.
     pub fn current_texture_for(&self, file_index: usize) -> Option<egui::TextureHandle> {
         let slot_idx = file_index.checked_sub(self.first_file_index)?;

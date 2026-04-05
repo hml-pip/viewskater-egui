@@ -472,12 +472,20 @@ impl eframe::App for App {
             (false, false)
         };
 
+        // Compute cache memory breakdown for FPS overlay
+        let cache_mb = if self.settings.show_fps {
+            let (lru, sw) = self.panes.first().map_or((0.0, 0.0), |p| p.cache_memory_mb());
+            Some((lru, sw))
+        } else {
+            None
+        };
+
         // Menu bar (top) — in fullscreen, revealed when cursor near top edge
         // or when a menu dropdown is open (so user can interact with items)
         let show_menu = !self.is_fullscreen || cursor_near_top || self.menu_open;
         if show_menu {
             let fps_text = if self.settings.show_fps && !self.is_fullscreen {
-                Some(self.perf.fps_text())
+                Some(self.perf.fps_text(cache_mb))
             } else {
                 None
             };
@@ -515,7 +523,7 @@ impl eframe::App for App {
 
         // FPS overlay in fullscreen (painted over central panel, top-right corner)
         if self.is_fullscreen && self.settings.show_fps {
-            let fps = self.perf.fps_text();
+            let fps = self.perf.fps_text(cache_mb);
             let screen = ctx.screen_rect();
             let font = egui::FontId::monospace(14.0);
             let color = egui::Color32::from_rgba_unmultiplied(220, 220, 220, 200);

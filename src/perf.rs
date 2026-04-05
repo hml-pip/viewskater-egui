@@ -97,8 +97,14 @@ impl ImagePerfTracker {
     }
 
     /// Build the FPS + memory display string.
-    pub(crate) fn fps_text(&mut self) -> String {
+    /// `cache_mb` is an optional (lru_mb, sliding_window_mb) breakdown.
+    pub(crate) fn fps_text(&mut self, cache_mb: Option<(f64, f64)>) -> String {
         self.poll_memory();
-        format!("Img: {:.1} FPS | {}", self.image_fps(), self.memory_text())
+        let mem = self.memory_text();
+        if let Some((lru, sw)) = cache_mb {
+            format!("Img: {:.1} FPS | {} (L:{:.0} C:{:.0})", self.image_fps(), mem, lru, sw)
+        } else {
+            format!("Img: {:.1} FPS | {}", self.image_fps(), mem)
+        }
     }
 }

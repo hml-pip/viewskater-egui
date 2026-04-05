@@ -249,6 +249,13 @@ impl Pane {
             .is_some_and(|c| c.current_texture_for(new_index).is_some())
     }
 
+    /// Returns (lru_mb, sliding_window_mb).
+    pub(crate) fn cache_memory_mb(&self) -> (f64, f64) {
+        let lru = self.decode_cache.total_mb();
+        let sw = self.cache.as_ref().map_or(0.0, |c| c.total_mb());
+        (lru, sw)
+    }
+
     pub(crate) fn poll_cache(&mut self) {
         if let Some(cache) = &mut self.cache {
             cache.poll(&self.image_paths);
