@@ -3682,6 +3682,7 @@ dependencies = [
  "eframe",
  "egui",
  "image",
+ "libc",
  "log",
  "natord",
  "rfd",

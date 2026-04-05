@@ -48,6 +48,12 @@ impl App {
         for pane in &mut self.panes {
             pane.close();
         }
+        // Return freed heap pages to the OS. Without this, glibc keeps the
+        // arena expanded and RSS stays inflated after dropping large caches.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            libc::malloc_trim(0);
+        }
     }
 
     pub(super) fn handle_menu_action(&mut self, action: MenuAction, ctx: &egui::Context) {
