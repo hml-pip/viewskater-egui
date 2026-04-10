@@ -426,7 +426,18 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Synchronize with the GPU before building the next frame.
+        // Without this, wgpu's multi-stage pipeline (staging buffer → copy →
+        // submit → present) can finish at variable times, causing irregular
+        // frame spacing during rapid keyboard navigation of 4K images.
+        // Blocking here until the previous frame's GPU work completes gives
+        // deterministic frame pacing comparable to glow's glSwapBuffers.
+        // Returns None when using the glow backend, so this is a no-op there.
+        if let Some(render_state) = frame.wgpu_render_state() {
+            render_state.device.poll(eframe::wgpu::Maintain::Wait);
+        }
+
         // Force dark theme every frame (egui_winit can reapply system theme on macOS)
         self.theme.apply_to_visuals(ctx);
 

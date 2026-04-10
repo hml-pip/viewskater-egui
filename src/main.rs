@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use eframe::egui;
+use eframe::{egui, egui_wgpu};
 
 mod about;
 mod app;
@@ -58,9 +58,16 @@ fn main() -> eframe::Result {
         _ => eframe::Renderer::Glow,
     };
 
+    let wgpu_options = egui_wgpu::WgpuConfiguration {
+        desired_maximum_frame_latency: Some(1),
+        ..Default::default()
+    };
+
     let options = eframe::NativeOptions {
         viewport,
         renderer,
+        dithering: false,
+        wgpu_options,
         ..Default::default()
     };
 
