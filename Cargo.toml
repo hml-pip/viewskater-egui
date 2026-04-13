@@ -8,7 +8,6 @@ description = "Fast image viewer built with egui"
 eframe = { version = "0.31", default-features = false, features = [
     "accesskit",
     "default_fonts",
-    "glow",
     "wgpu",
     "wayland",
     "x11",

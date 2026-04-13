@@ -24,10 +24,6 @@ mod theme;
 struct Args {
     /// Paths to image files or directories
     paths: Vec<PathBuf>,
-
-    /// Rendering backend: "glow" (OpenGL, default) or "wgpu"
-    #[arg(long, default_value = "glow")]
-    renderer: String,
 }
 
 /// Create a wgpu Instance/Adapter/Device/Queue with the user-selected
@@ -117,11 +113,6 @@ fn main() -> eframe::Result {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
     }
 
-    let renderer = match args.renderer.as_str() {
-        "wgpu" => eframe::Renderer::Wgpu,
-        _ => eframe::Renderer::Glow,
-    };
-
     // Build the wgpu setup using the user-selected memory mode from settings.
     // The wgpu device is created once at startup and cannot be reconfigured
     // at runtime, so changes to gpu_memory_mode only take effect on next launch.
@@ -136,7 +127,7 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport,
-        renderer,
+        renderer: eframe::Renderer::Wgpu,
         dithering: false,
         wgpu_options,
         ..Default::default()
