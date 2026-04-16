@@ -140,23 +140,18 @@ fn gpu_memory_radio(
     ui.add_space(4.0);
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GpuMemoryMode {
     /// gpu_allocator default (~256 MB blocks). Highest navigation speed,
     /// largest GPU memory footprint.
     Performance,
     /// 64 MB device / 32 MB host blocks. Recommended balance.
+    #[default]
     Balanced,
     /// 8 MB device / 4 MB host blocks. Lowest GPU memory, but a 4K texture
     /// no longer fits in a single block — degrades navigation performance.
     LowMemory,
-}
-
-impl Default for GpuMemoryMode {
-    fn default() -> Self {
-        Self::Balanced
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

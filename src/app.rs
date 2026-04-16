@@ -118,8 +118,8 @@ impl App {
         cc: &eframe::CreationContext<'_>,
         paths: Vec<PathBuf>,
         log_buffer: Arc<Mutex<VecDeque<String>>>,
+        settings: AppSettings,
     ) -> Self {
-        let settings = AppSettings::load();
         let theme = UiTheme::teal_dark();
         theme.apply_to_visuals(&cc.egui_ctx);
         let mut app = Self {

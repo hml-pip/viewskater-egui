@@ -53,32 +53,47 @@ fn build_wgpu_setup(mode: GpuMemoryMode) -> egui_wgpu::WgpuSetupExisting {
         backend_options: wgpu::BackendOptions::from_env_or_default(),
     });
 
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: None,
-        force_fallback_adapter: false,
-    }))
-    .expect("Failed to find a wgpu adapter");
+    // Adapter selection runs before any window or surface exists, so we pass
+    // `compatible_surface: None`. On desktop GPUs with normal drivers, any
+    // primary adapter is compatible with any window surface, so this is safe.
+    // eframe's default path does surface-aware adapter selection, which we
+    // bypass here to gain explicit control over DeviceDescriptor.memory_hints.
+    // If exotic environments (headless, VNC, unusual virtualization) report
+    // startup failures, reverting to eframe's default setup path is the fix.
+    let (adapter, device, queue) = pollster::block_on(async {
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .await
+            .expect("Failed to find a wgpu adapter");
 
-    let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
-        wgpu::Limits::downlevel_webgl2_defaults()
-    } else {
-        wgpu::Limits::default()
-    };
+        let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
+            wgpu::Limits::downlevel_webgl2_defaults()
+        } else {
+            wgpu::Limits::default()
+        };
 
-    let (device, queue) = pollster::block_on(adapter.request_device(
-        &wgpu::DeviceDescriptor {
-            label: Some("viewskater wgpu device"),
-            required_features: wgpu::Features::default(),
-            required_limits: wgpu::Limits {
-                max_texture_dimension_2d: 8192,
-                ..base_limits
-            },
-            memory_hints,
-        },
-        None,
-    ))
-    .expect("Failed to create wgpu device");
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("viewskater wgpu device"),
+                    required_features: wgpu::Features::default(),
+                    required_limits: wgpu::Limits {
+                        max_texture_dimension_2d: 8192,
+                        ..base_limits
+                    },
+                    memory_hints,
+                },
+                None,
+            )
+            .await
+            .expect("Failed to create wgpu device");
+
+        (adapter, device, queue)
+    });
 
     egui_wgpu::WgpuSetupExisting {
         instance,
@@ -136,6 +151,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "viewskater-egui",
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(cc, args.paths, log_buffer)))),
+        Box::new(move |cc| Ok(Box::new(app::App::new(cc, args.paths, log_buffer, settings)))),
     )
 }
