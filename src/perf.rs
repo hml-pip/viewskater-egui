@@ -7,13 +7,15 @@ const MEMORY_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Tracks image rendering performance — how many unique images are
 /// displayed per second, not UI event loop frame rate.
-/// Also tracks process memory usage (RSS).
+/// Also tracks process memory (RSS) and wgpu-reported GPU memory.
 pub(crate) struct ImagePerfTracker {
     image_timestamps: VecDeque<Instant>,
     sys: System,
     pid: Pid,
     last_memory_check: Instant,
     memory_bytes: u64,
+    last_gpu_check: Instant,
+    gpu_memory_bytes: u64,
 }
 
 impl ImagePerfTracker {
@@ -33,6 +35,8 @@ impl ImagePerfTracker {
             pid,
             last_memory_check: Instant::now(),
             memory_bytes,
+            last_gpu_check: Instant::now() - MEMORY_POLL_INTERVAL,
+            gpu_memory_bytes: 0,
         }
     }
 
@@ -86,13 +90,44 @@ impl ImagePerfTracker {
         }
     }
 
-    /// Format memory bytes as a human-readable string.
-    fn memory_text(&self) -> String {
-        let mb = self.memory_bytes as f64 / (1024.0 * 1024.0);
+    /// Sample wgpu-hal memory counters for the current device. Throttled to
+    /// once per second. Sums buffer + texture + acceleration-structure bytes
+    /// tracked by gpu_allocator. Requires the `counters` feature on wgpu
+    /// (enabled via direct dep in Cargo.toml); otherwise reads return 0.
+    pub(crate) fn sample_gpu_memory(&mut self, device: &wgpu::Device) {
+        let now = Instant::now();
+        if now.duration_since(self.last_gpu_check) < MEMORY_POLL_INTERVAL {
+            return;
+        }
+        let hal = device.get_internal_counters().hal;
+        let tex = hal.texture_memory.read();
+        let buf = hal.buffer_memory.read();
+        let accel = hal.acceleration_structure_memory.read();
+        let allocs = hal.memory_allocations.read();
+        let num_textures = hal.textures.read();
+        let num_buffers = hal.buffers.read();
+        let bytes = tex + buf + accel;
+        self.gpu_memory_bytes = bytes.max(0) as u64;
+        self.last_gpu_check = now;
+        log::debug!(
+            "wgpu hal counters: total={}MB (tex={}MB, buf={}MB, accel={}MB); \
+             textures={} buffers={} allocations={}",
+            bytes / (1024 * 1024),
+            tex / (1024 * 1024),
+            buf / (1024 * 1024),
+            accel / (1024 * 1024),
+            num_textures,
+            num_buffers,
+            allocs,
+        );
+    }
+
+    fn format_mb(bytes: u64) -> String {
+        let mb = bytes as f64 / (1024.0 * 1024.0);
         if mb >= 1024.0 {
-            format!("{:.1} GB", mb / 1024.0)
+            format!("{:.1}G", mb / 1024.0)
         } else {
-            format!("{:.0} MB", mb)
+            format!("{:.0}", mb)
         }
     }
 
@@ -100,11 +135,24 @@ impl ImagePerfTracker {
     /// `cache_mb` is an optional (lru_mb, sliding_window_mb) breakdown.
     pub(crate) fn fps_text(&mut self, cache_mb: Option<(f64, f64)>) -> String {
         self.poll_memory();
-        let mem = self.memory_text();
+        let rss = Self::format_mb(self.memory_bytes);
+        let gpu = Self::format_mb(self.gpu_memory_bytes);
         if let Some((lru, sw)) = cache_mb {
-            format!("Img: {:.1} FPS | {} (L:{:.0} C:{:.0})", self.image_fps(), mem, lru, sw)
+            format!(
+                "Img: {:.1} FPS | RSS:{} GPU:{} (L:{:.0} C:{:.0})",
+                self.image_fps(),
+                rss,
+                gpu,
+                lru,
+                sw
+            )
         } else {
-            format!("Img: {:.1} FPS | {}", self.image_fps(), mem)
+            format!(
+                "Img: {:.1} FPS | RSS:{} GPU:{}",
+                self.image_fps(),
+                rss,
+                gpu
+            )
         }
     }
 }

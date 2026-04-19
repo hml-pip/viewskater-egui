@@ -36,6 +36,7 @@ dirs = "6"
 sysinfo = "0.33"
 libc = "0.2"
 pollster = "0.4"
+wgpu = { version = "24", default-features = false, features = ["counters"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"

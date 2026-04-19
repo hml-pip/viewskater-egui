@@ -439,6 +439,7 @@ impl eframe::App for App {
         // deterministic frame pacing.
         if let Some(render_state) = frame.wgpu_render_state() {
             render_state.device.poll(eframe::wgpu::Maintain::Wait);
+            self.perf.sample_gpu_memory(&render_state.device);
         }
 
         // Force dark theme every frame (egui_winit can reapply system theme on macOS)
