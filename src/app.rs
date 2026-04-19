@@ -118,8 +118,8 @@ impl App {
         cc: &eframe::CreationContext<'_>,
         paths: Vec<PathBuf>,
         log_buffer: Arc<Mutex<VecDeque<String>>>,
+        settings: AppSettings,
     ) -> Self {
-        let settings = AppSettings::load();
         let theme = UiTheme::teal_dark();
         theme.apply_to_visuals(&cc.egui_ctx);
         let mut app = Self {
@@ -426,7 +426,17 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Synchronize with the GPU before building the next frame.
+        // Without this, wgpu's multi-stage pipeline (staging buffer → copy →
+        // submit → present) can finish at variable times, causing irregular
+        // frame spacing during rapid keyboard navigation of 4K images.
+        // Blocking here until the previous frame's GPU work completes gives
+        // deterministic frame pacing.
+        if let Some(render_state) = frame.wgpu_render_state() {
+            render_state.device.poll(eframe::wgpu::Maintain::Wait);
+        }
+
         // Force dark theme every frame (egui_winit can reapply system theme on macOS)
         self.theme.apply_to_visuals(ctx);
 
@@ -556,15 +566,11 @@ impl eframe::App for App {
             }
         }
 
-        // Settings modal
-        let prev_show_settings = self.show_settings;
+        // Settings modal — auto-saves on any change inside the modal.
         let perf_changed =
             settings::show_settings_modal(ctx, &mut self.settings, &mut self.show_settings, &self.theme);
         if perf_changed {
             self.apply_settings_to_caches();
-        }
-        if prev_show_settings && !self.show_settings {
-            self.settings.save();
         }
 
         // About modal (on top of everything)
