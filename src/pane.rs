@@ -21,11 +21,12 @@ pub(crate) struct Pane {
     pub(crate) decode_cache: cache::DecodeLruCache,
     pub(crate) cache_count: usize,
     pub(crate) lru_budget_mb: usize,
+    pub(crate) decode_threads: usize,
     pub(crate) selected: bool,
 }
 
 impl Pane {
-    pub(crate) fn new(ctx: &egui::Context, cache_count: usize, lru_budget_mb: usize) -> Self {
+    pub(crate) fn new(ctx: &egui::Context, cache_count: usize, lru_budget_mb: usize, decode_threads: usize) -> Self {
         Self {
             image_paths: Vec::new(),
             current_index: 0,
@@ -37,6 +38,7 @@ impl Pane {
             decode_cache: cache::DecodeLruCache::new(ctx, lru_budget_mb),
             cache_count,
             lru_budget_mb,
+            decode_threads,
             selected: true,
         }
     }
@@ -81,7 +83,7 @@ impl Pane {
         self.pan = egui::Vec2::ZERO;
         self.decode_cache.clear();
 
-        let mut c = cache::SlidingWindowCache::new(ctx, self.cache_count);
+        let mut c = cache::SlidingWindowCache::new(ctx, self.cache_count, self.decode_threads);
         c.initialize(self.current_index, &self.image_paths);
         self.current_texture = c.current_texture_for(self.current_index);
         self.cache = Some(c);

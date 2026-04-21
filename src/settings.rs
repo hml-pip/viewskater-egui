@@ -163,6 +163,7 @@ pub struct AppSettings {
     pub sync_zoom_pan: bool,
     pub cache_count: usize,
     pub lru_budget_mb: usize,
+    pub decode_threads: usize,
     pub gpu_memory_mode: GpuMemoryMode,
 }
 
@@ -175,6 +176,7 @@ impl Default for AppSettings {
             sync_zoom_pan: true,
             cache_count: 5,
             lru_budget_mb: 1024,
+            decode_threads: 10,
             gpu_memory_mode: GpuMemoryMode::default(),
         }
     }
@@ -233,6 +235,7 @@ pub fn show_settings_modal(
 
     let prev_cache_count = settings.cache_count;
     let prev_lru_budget = settings.lru_budget_mb;
+    let prev_decode_threads = settings.decode_threads;
 
     // Semi-transparent backdrop
     let screen = ctx.screen_rect();
@@ -380,16 +383,39 @@ pub fn show_settings_modal(
                         .corner_radius(6.0)
                         .inner_margin(10.0)
                         .show(ui, |ui| {
+                            let defaults = AppSettings::default();
+
                             ui.horizontal(|ui| {
                                 ui.label("Cache Size");
-                                let defaults = AppSettings::default();
                                 accent_slider(ui, &mut settings.cache_count, 1..=20, defaults.cache_count, theme);
                             });
+                            ui.label(
+                                egui::RichText::new("Images prefetched in each direction. Higher = smoother keyboard nav, more GPU memory.")
+                                    .size(11.0)
+                                    .color(theme.muted),
+                            );
+                            ui.add_space(6.0);
+
                             ui.horizontal(|ui| {
                                 ui.label("LRU Budget (MB)");
-                                let defaults = AppSettings::default();
                                 accent_slider(ui, &mut settings.lru_budget_mb, 128..=4096, defaults.lru_budget_mb, theme);
                             });
+                            ui.label(
+                                egui::RichText::new("GPU memory for caching slider-visited images. Higher = faster revisits, more VRAM.")
+                                    .size(11.0)
+                                    .color(theme.muted),
+                            );
+                            ui.add_space(6.0);
+
+                            ui.horizontal(|ui| {
+                                ui.label("Decode Threads");
+                                accent_slider(ui, &mut settings.decode_threads, 1..=16, defaults.decode_threads, theme);
+                            });
+                            ui.label(
+                                egui::RichText::new("Concurrent image decodes. Higher = faster cache fill, larger memory spikes.")
+                                    .size(11.0)
+                                    .color(theme.muted),
+                            );
                         });
 
                     ui.add_space(10.0);
@@ -431,5 +457,7 @@ pub fn show_settings_modal(
         ctx.data_mut(|d| d.insert_temp(saved_at_id, now));
     }
 
-    settings.cache_count != prev_cache_count || settings.lru_budget_mb != prev_lru_budget
+    settings.cache_count != prev_cache_count
+        || settings.lru_budget_mb != prev_lru_budget
+        || settings.decode_threads != prev_decode_threads
 }

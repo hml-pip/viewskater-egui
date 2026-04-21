@@ -14,7 +14,7 @@ impl App {
 
     pub(super) fn set_dual_pane(&mut self, ctx: &egui::Context) {
         if self.panes.len() < 2 {
-            let mut pane = Pane::new(ctx, self.settings.cache_count, self.settings.lru_budget_mb);
+            let mut pane = Pane::new(ctx, self.settings.cache_count, self.settings.lru_budget_mb, self.settings.decode_threads);
             if !self.panes[0].image_paths.is_empty() {
                 if let Some(dir) = self.panes[0].image_paths[0].parent() {
                     pane.open_path(dir, ctx);
@@ -143,8 +143,12 @@ impl App {
                 );
             }
             pane.decode_cache.set_budget_mb(self.settings.lru_budget_mb);
+            if let Some(cache) = &mut pane.cache {
+                cache.set_decode_threads(self.settings.decode_threads);
+            }
             pane.cache_count = self.settings.cache_count;
             pane.lru_budget_mb = self.settings.lru_budget_mb;
+            pane.decode_threads = self.settings.decode_threads;
         }
     }
 

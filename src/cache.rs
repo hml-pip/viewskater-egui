@@ -38,9 +38,11 @@ pub struct SlidingWindowCache {
     pending_uploads: VecDeque<(usize, egui::ColorImage, String)>,
 
     /// Decode requests waiting for a thread slot. `spawn_load` pushes here
-    /// when `in_flight.len() >= MAX_CONCURRENT_DECODES`; `poll` spawns the
-    /// next one when a decode completes and frees a slot.
+    /// when the concurrent limit is reached; `poll` spawns the next one
+    /// when a decode completes and frees a slot.
     pending_decodes: VecDeque<(usize, PathBuf)>,
+
+    max_decode_threads: usize,
 
     ctx: egui::Context,
 }
@@ -49,13 +51,9 @@ pub struct SlidingWindowCache {
 /// frame.
 const UPLOADS_PER_FRAME: usize = 2;
 
-/// Maximum number of background decode threads running simultaneously.
-/// Each 4K decode uses ~60 MB of temporary CPU memory (PNG decompression +
-/// RGB→RGBA conversion). Capping at 1 keeps the transient CPU peak low.
-const MAX_CONCURRENT_DECODES: usize = 10;
 
 impl SlidingWindowCache {
-    pub fn new(ctx: &egui::Context, cache_count: usize) -> Self {
+    pub fn new(ctx: &egui::Context, cache_count: usize, decode_threads: usize) -> Self {
         let cache_size = cache_count * 2 + 1;
         let (tx, rx) = mpsc::channel();
 
@@ -68,6 +66,7 @@ impl SlidingWindowCache {
             in_flight: HashSet::new(),
             pending_uploads: VecDeque::new(),
             pending_decodes: VecDeque::new(),
+            max_decode_threads: decode_threads,
             ctx: ctx.clone(),
         }
     }
@@ -143,7 +142,7 @@ impl SlidingWindowCache {
             }
 
             // A decode slot freed up — spawn the next queued decode if any.
-            while self.in_flight.len() < MAX_CONCURRENT_DECODES {
+            while self.in_flight.len() < self.max_decode_threads {
                 if let Some((idx, path)) = self.pending_decodes.pop_front() {
                     if self.slot_index_for(idx).is_some() {
                         self.spawn_thread(idx, &path);
@@ -244,6 +243,10 @@ impl SlidingWindowCache {
         self.initialize(current_index, image_paths);
     }
 
+    pub fn set_decode_threads(&mut self, n: usize) {
+        self.max_decode_threads = n.max(1);
+    }
+
     /// Returns a compact summary of the cache window for debug logging.
     /// Format: `[first..last] loaded/total inflight=N`
     pub fn summary(&self) -> String {
@@ -291,7 +294,7 @@ impl SlidingWindowCache {
         }
     }
 
-    /// Queue a background decode. If fewer than `MAX_CONCURRENT_DECODES`
+    /// Queue a background decode. If fewer than `self.max_decode_threads`
     /// threads are running, spawns immediately; otherwise queues until a
     /// slot opens in `poll`.
     fn spawn_load(&mut self, file_index: usize, path: &Path) {
@@ -302,7 +305,7 @@ impl SlidingWindowCache {
             return;
         }
 
-        if self.in_flight.len() < MAX_CONCURRENT_DECODES {
+        if self.in_flight.len() < self.max_decode_threads {
             self.spawn_thread(file_index, path);
         } else {
             self.pending_decodes.push_back((file_index, path.to_path_buf()));
