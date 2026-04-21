@@ -31,8 +31,21 @@ pub struct SlidingWindowCache {
     rx: mpsc::Receiver<DecodeResult>,
     in_flight: HashSet<usize>,
 
+    /// Completed decodes that haven't been uploaded to the GPU yet. `poll()`
+    /// drains `rx` into this queue and then uploads up to
+    /// `UPLOADS_PER_FRAME` entries, so the initial 11-texture burst no
+    /// longer peaks staging buffers and glibc arenas at ~363 MB.
+    pending_uploads: VecDeque<(usize, egui::ColorImage, String)>,
+
     ctx: egui::Context,
 }
+
+/// Maximum number of GPU uploads issued by `SlidingWindowCache::poll` per
+/// frame. Higher values shorten the time to fully populate the cache on
+/// directory open but increase peak CPU staging + glibc arena pressure.
+/// 2 uploads × 33 MB per 4K texture ≈ 66 MB peak staging, fully populates
+/// an 11-slot window in ~5 frames.
+const UPLOADS_PER_FRAME: usize = 2;
 
 impl SlidingWindowCache {
     pub fn new(ctx: &egui::Context, cache_count: usize) -> Self {
@@ -46,6 +59,7 @@ impl SlidingWindowCache {
             tx,
             rx,
             in_flight: HashSet::new(),
+            pending_uploads: VecDeque::new(),
             ctx: ctx.clone(),
         }
     }
@@ -65,6 +79,9 @@ impl SlidingWindowCache {
         // Drain any pending results from previous window
         while self.rx.try_recv().is_ok() {}
         self.in_flight.clear();
+        // Drop any not-yet-uploaded ColorImages from the previous window —
+        // their slots are about to be reassigned.
+        self.pending_uploads.clear();
 
         let cache_size = self.cache_size();
 
@@ -97,18 +114,37 @@ impl SlidingWindowCache {
 
     /// Poll for completed background decodes and upload textures.
     /// Call this every frame from `update()`.
+    ///
+    /// Split into two phases:
+    /// 1. Drain completed decodes from the channel into `pending_uploads`
+    ///    (cheap, just moves `ColorImage`s into the queue).
+    /// 2. Issue up to `UPLOADS_PER_FRAME` GPU uploads. This caps the
+    ///    staging-buffer peak that previously inflated gpu_allocator's
+    ///    host pool and glibc arenas on directory open.
     pub fn poll(&mut self, image_paths: &[PathBuf]) {
+        // Phase 1: drain decode results into the upload queue.
         while let Ok(result) = self.rx.try_recv() {
             self.in_flight.remove(&result.file_index);
+            if let Some(color_image) = result.image {
+                let name = image_paths
+                    .get(result.file_index)
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.pending_uploads
+                    .push_back((result.file_index, color_image, name));
+            }
+        }
 
-            let slot_idx = self.slot_index_for(result.file_index);
-            if let Some(slot_idx) = slot_idx {
-                if let Some(color_image) = result.image {
-                    let name = image_paths
-                        .get(result.file_index)
-                        .and_then(|p| p.file_name())
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
+        // Phase 2: upload at most UPLOADS_PER_FRAME. Any entry whose slot
+        // has fallen outside the window (because navigate/jump shifted it
+        // while this upload was pending) is dropped on the floor.
+        for _ in 0..UPLOADS_PER_FRAME {
+            let Some((file_index, color_image, name)) = self.pending_uploads.pop_front() else {
+                break;
+            };
+            if let Some(slot_idx) = self.slot_index_for(file_index) {
+                if self.slots[slot_idx].is_none() {
                     let texture = self.ctx.load_texture(
                         name,
                         color_image,
@@ -116,8 +152,15 @@ impl SlidingWindowCache {
                     );
                     self.slots[slot_idx] = Some(texture);
                 }
+                // else: another decode already filled this slot, drop.
             }
-            // else: stale result for index outside current window, drop
+            // else: stale for current window, drop.
+        }
+
+        // Keep ticking frames until the queue drains, even if nothing else
+        // in the UI requests a repaint.
+        if !self.pending_uploads.is_empty() {
+            self.ctx.request_repaint();
         }
     }
 
