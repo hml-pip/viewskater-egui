@@ -14,7 +14,7 @@ impl App {
 
     pub(super) fn set_dual_pane(&mut self, ctx: &egui::Context) {
         if self.panes.len() < 2 {
-            let mut pane = Pane::new(self.settings.cache_count, self.settings.lru_budget_mb);
+            let mut pane = Pane::new(ctx, self.settings.cache_count, self.settings.lru_budget_mb);
             if !self.panes[0].image_paths.is_empty() {
                 if let Some(dir) = self.panes[0].image_paths[0].parent() {
                     pane.open_path(dir, ctx);

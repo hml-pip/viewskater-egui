@@ -441,79 +441,94 @@ impl SliderLoader {
     }
 }
 
-/// LRU cache of decoded images, keyed by file index.
+/// LRU cache of uploaded GPU textures, keyed by file index.
 ///
-/// Stores decoded `ColorImage` in CPU memory so that revisiting an image
-/// during slider scrubbing skips the ~90ms decode. This is the egui
-/// equivalent of iced's raster cache where `Memory::Device(entry)` returns
-/// instantly for previously-loaded images.
+/// On a hit, returns the existing `TextureHandle` directly — no CPU→GPU
+/// upload needed. On a miss, uploads the decoded pixels once and stores
+/// the resulting handle. LRU eviction drops the handle, which drops the
+/// GPU allocation on the next `TextureDelta::Free` tick.
 ///
-/// Uses a memory budget (in bytes) instead of a fixed entry count so the
-/// cache self-adjusts for any resolution: 4K images (~32 MB each) get fewer
-/// entries than 1080p images (~8 MB each) for the same budget.
+/// Uses a byte budget rather than a fixed entry count so the cache
+/// self-adjusts for any resolution: 4K textures (~32 MB each) get fewer
+/// entries than 1080p (~8 MB each) for the same budget. Bytes are
+/// computed as `width × height × 4` (RGBA), matching how egui sizes
+/// uploaded textures.
 pub struct DecodeLruCache {
-    /// Map from file_index → decoded ColorImage
-    entries: HashMap<usize, egui::ColorImage>,
-    /// Access order for LRU eviction — most recently used at the back
+    /// Map from file_index → uploaded texture handle.
+    entries: HashMap<usize, egui::TextureHandle>,
+    /// Access order for LRU eviction — most recently used at the back.
     order: VecDeque<usize>,
-    /// Maximum total bytes for cached images
+    /// Maximum total bytes for cached textures.
     budget_bytes: usize,
-    /// Current total bytes of cached images
+    /// Current total bytes of cached textures.
     total_bytes: usize,
+    /// egui context for uploading via `load_texture`.
+    ctx: egui::Context,
 }
 
 impl DecodeLruCache {
-    pub fn new(budget_mb: usize) -> Self {
+    pub fn new(ctx: &egui::Context, budget_mb: usize) -> Self {
         Self {
             entries: HashMap::new(),
             order: VecDeque::new(),
             budget_bytes: budget_mb * 1024 * 1024,
             total_bytes: 0,
+            ctx: ctx.clone(),
         }
     }
 
-    /// Byte size of a ColorImage (width × height × 4 bytes per Color32).
-    fn image_bytes(image: &egui::ColorImage) -> usize {
-        image.size[0] * image.size[1] * 4
+    /// Byte size of a handle's underlying texture (width × height × 4).
+    fn handle_bytes(handle: &egui::TextureHandle) -> usize {
+        let size = handle.size();
+        size[0] * size[1] * 4
     }
 
-    /// Get a decoded image if cached. Moves entry to most-recently-used.
-    pub fn get(&mut self, file_index: usize) -> Option<&egui::ColorImage> {
+    /// Get the cached texture for `file_index`, if any. Marks MRU.
+    pub fn get(&mut self, file_index: usize) -> Option<egui::TextureHandle> {
         if self.entries.contains_key(&file_index) {
-            // Move to back (most recently used)
             self.order.retain(|&i| i != file_index);
             self.order.push_back(file_index);
-            self.entries.get(&file_index)
+            self.entries.get(&file_index).cloned()
         } else {
             None
         }
     }
 
-    /// Insert a decoded image. Evicts least recently used entries until the
-    /// total stays within the memory budget.
-    pub fn insert(&mut self, file_index: usize, image: egui::ColorImage) {
-        let new_bytes = Self::image_bytes(&image);
+    /// Upload a decoded image as a new GPU texture, store as MRU, and
+    /// evict LRU entries until within budget. Returns the new handle.
+    pub fn insert(
+        &mut self,
+        file_index: usize,
+        name: impl Into<String>,
+        image: egui::ColorImage,
+    ) -> egui::TextureHandle {
+        let new_bytes = image.size[0] * image.size[1] * 4;
 
-        // If replacing an existing entry, remove its bytes first
+        // If replacing an existing entry, drop its bytes first.
         if let Some(old) = self.entries.remove(&file_index) {
-            self.total_bytes -= Self::image_bytes(&old);
+            self.total_bytes -= Self::handle_bytes(&old);
             self.order.retain(|&i| i != file_index);
         }
 
-        // Evict LRU entries until there's room
+        // Evict LRU until there's room. Do this before the upload so the
+        // gpu_allocator sees the freed textures first (drop happens
+        // synchronously here, but the GPU free is processed at the next
+        // TextureDelta flush).
         while self.total_bytes + new_bytes > self.budget_bytes {
             if let Some(evicted) = self.order.pop_front() {
-                if let Some(img) = self.entries.remove(&evicted) {
-                    self.total_bytes -= Self::image_bytes(&img);
+                if let Some(h) = self.entries.remove(&evicted) {
+                    self.total_bytes -= Self::handle_bytes(&h);
                 }
             } else {
                 break;
             }
         }
 
+        let handle = self.ctx.load_texture(name, image, egui::TextureOptions::LINEAR);
         self.total_bytes += new_bytes;
-        self.entries.insert(file_index, image);
+        self.entries.insert(file_index, handle.clone());
         self.order.push_back(file_index);
+        handle
     }
 
     pub fn len(&self) -> usize {
@@ -535,8 +550,8 @@ impl DecodeLruCache {
         self.budget_bytes = budget_mb * 1024 * 1024;
         while self.total_bytes > self.budget_bytes {
             if let Some(evicted) = self.order.pop_front() {
-                if let Some(img) = self.entries.remove(&evicted) {
-                    self.total_bytes -= Self::image_bytes(&img);
+                if let Some(h) = self.entries.remove(&evicted) {
+                    self.total_bytes -= Self::handle_bytes(&h);
                 }
             } else {
                 break;
