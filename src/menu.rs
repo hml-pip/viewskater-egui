@@ -98,7 +98,6 @@ pub(crate) fn show_menu_bar(
     settings: &mut AppSettings,
     theme: &UiTheme,
     fps_text: Option<&str>,
-    is_fullscreen: bool,
 ) -> (MenuAction, bool) {
     let mut action = MenuAction::None;
     let mut menu_is_open = false;
@@ -232,7 +231,7 @@ pub(crate) fn show_menu_bar(
                     }
                 });
                 hover_row(ui, theme, ml, mw, |ui| {
-                    let label = if is_fullscreen {
+                    let label = if ui.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
                         "Exit Fullscreen  F11"
                     } else {
                         "Fullscreen  F11"

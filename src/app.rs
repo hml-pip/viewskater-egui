@@ -108,7 +108,6 @@ pub struct App {
     pub(crate) theme: UiTheme,
     pub(crate) show_settings: bool,
     pub(crate) show_about: bool,
-    pub(crate) is_fullscreen: bool,
     pub(crate) menu_open: bool,
     pub(crate) log_buffer: Arc<Mutex<VecDeque<String>>>,
     initial_size_set: bool,
@@ -134,7 +133,6 @@ impl App {
             theme,
             show_settings: false,
             show_about: false,
-            is_fullscreen: false,
             menu_open: false,
             log_buffer,
             initial_size_set: false,
@@ -471,8 +469,9 @@ impl eframe::App for App {
         self.handle_keyboard(ctx);
         self.update_title(ctx);
 
+        let is_fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         // Detect cursor proximity to screen edges for fullscreen UI reveal
-        let (cursor_near_top, cursor_near_bottom) = if self.is_fullscreen {
+        let (cursor_near_top, cursor_near_bottom) = if is_fullscreen {
             let screen = ctx.screen_rect();
             ctx.input(|i| {
                 if let Some(pos) = i.pointer.hover_pos() {
@@ -498,9 +497,9 @@ impl eframe::App for App {
 
         // Menu bar (top) — in fullscreen, revealed when cursor near top edge
         // or when a menu dropdown is open (so user can interact with items)
-        let show_menu = !self.is_fullscreen || cursor_near_top || self.menu_open;
+        let show_menu = !is_fullscreen || cursor_near_top || self.menu_open;
         if show_menu {
-            let fps_text = if self.settings.show_fps && !self.is_fullscreen {
+            let fps_text = if self.settings.show_fps && !is_fullscreen {
                 Some(self.perf.fps_text(cache_mb))
             } else {
                 None
@@ -513,7 +512,6 @@ impl eframe::App for App {
                 &mut self.settings,
                 &self.theme,
                 fps_text.as_deref(),
-                self.is_fullscreen,
             );
             self.menu_open = menu_is_open;
             if self.settings != settings_snapshot {
@@ -525,12 +523,12 @@ impl eframe::App for App {
         }
 
         // Footer — in fullscreen, revealed when cursor near bottom edge
-        if self.settings.show_footer && (!self.is_fullscreen || cursor_near_bottom) {
+        if self.settings.show_footer && (!is_fullscreen || cursor_near_bottom) {
             menu::show_footer(ctx, &self.panes, self.divider_fraction);
         }
 
         // Slider panel — in fullscreen, revealed when cursor near bottom edge
-        if !self.is_fullscreen || cursor_near_bottom {
+        if !is_fullscreen || cursor_near_bottom {
             self.show_slider_panel(ctx);
         }
 
@@ -538,7 +536,7 @@ impl eframe::App for App {
         self.show_central_panel(ctx);
 
         // FPS overlay in fullscreen (painted over central panel, top-right corner)
-        if self.is_fullscreen && self.settings.show_fps {
+        if is_fullscreen && self.settings.show_fps {
             let fps = self.perf.fps_text(cache_mb);
             let screen = ctx.screen_rect();
             let font = egui::FontId::monospace(14.0);

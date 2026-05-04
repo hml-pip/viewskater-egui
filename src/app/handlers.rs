@@ -153,8 +153,9 @@ impl App {
     }
 
     pub(super) fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
-        self.is_fullscreen = !self.is_fullscreen;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.is_fullscreen));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+            !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)))
+        );
     }
 
     pub(super) fn handle_keyboard(&mut self, ctx: &egui::Context) {
@@ -195,7 +196,7 @@ impl App {
             self.toggle_fullscreen(ctx);
             return;
         }
-        if escape && self.is_fullscreen {
+        if escape && ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) {
             self.toggle_fullscreen(ctx);
             return;
         }
