@@ -126,7 +126,7 @@ impl App {
         let theme = UiTheme::teal_dark();
         theme.apply_to_visuals(&cc.egui_ctx);
         let mut app = Self {
-            panes: vec![Pane::new(settings.cache_count, settings.lru_budget_mb)],
+            panes: vec![Pane::new(&cc.egui_ctx, settings.cache_count, settings.lru_budget_mb, settings.decode_threads)],
             perf: perf::ImagePerfTracker::new(),
             divider_fraction: 0.5,
             dual_pane_mode: DualPaneMode::Synced,
@@ -145,7 +145,7 @@ impl App {
             app.panes[0].open_path(&paths[0], &cc.egui_ctx);
         }
         if paths.len() >= 2 {
-            let mut pane1 = Pane::new(app.settings.cache_count, app.settings.lru_budget_mb);
+            let mut pane1 = Pane::new(&cc.egui_ctx, app.settings.cache_count, app.settings.lru_budget_mb, app.settings.decode_threads);
             pane1.open_path(&paths[1], &cc.egui_ctx);
             app.panes.push(pane1);
         }
@@ -439,6 +439,7 @@ impl eframe::App for App {
         // deterministic frame pacing.
         if let Some(render_state) = frame.wgpu_render_state() {
             render_state.device.poll(eframe::wgpu::Maintain::Wait);
+            self.perf.sample_gpu_memory(&render_state.device);
         }
 
         // Force dark theme every frame (egui_winit can reapply system theme on macOS)

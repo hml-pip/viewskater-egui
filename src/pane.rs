@@ -21,11 +21,12 @@ pub(crate) struct Pane {
     pub(crate) decode_cache: cache::DecodeLruCache,
     pub(crate) cache_count: usize,
     pub(crate) lru_budget_mb: usize,
+    pub(crate) decode_threads: usize,
     pub(crate) selected: bool,
 }
 
 impl Pane {
-    pub(crate) fn new(cache_count: usize, lru_budget_mb: usize) -> Self {
+    pub(crate) fn new(ctx: &egui::Context, cache_count: usize, lru_budget_mb: usize, decode_threads: usize) -> Self {
         Self {
             image_paths: Vec::new(),
             current_index: 0,
@@ -34,9 +35,10 @@ impl Pane {
             pan: egui::Vec2::ZERO,
             cache: None,
             slider_loader: None,
-            decode_cache: cache::DecodeLruCache::new(lru_budget_mb),
+            decode_cache: cache::DecodeLruCache::new(ctx, lru_budget_mb),
             cache_count,
             lru_budget_mb,
+            decode_threads,
             selected: true,
         }
     }
@@ -81,7 +83,7 @@ impl Pane {
         self.pan = egui::Vec2::ZERO;
         self.decode_cache.clear();
 
-        let mut c = cache::SlidingWindowCache::new(ctx, self.cache_count);
+        let mut c = cache::SlidingWindowCache::new(ctx, self.cache_count, self.decode_threads);
         c.initialize(self.current_index, &self.image_paths);
         self.current_texture = c.current_texture_for(self.current_index);
         self.cache = Some(c);
@@ -89,42 +91,24 @@ impl Pane {
     }
 
     /// Synchronous decode fallback for slider drag and jump.
-    /// Checks the LRU decode cache first to skip the ~90ms decode on revisits.
-    /// Reuses the existing TextureHandle via `set()` when possible to
-    /// avoid GPU texture allocation overhead on every call.
-    fn load_sync(&mut self, ctx: &egui::Context) {
-        let Some(path) = self.image_paths.get(self.current_index) else {
+    /// Checks the GPU-backed LRU first to skip both decode and re-upload on
+    /// revisits. On miss, decodes from disk and uploads a new texture via
+    /// `DecodeLruCache::insert`, which also handles budget eviction.
+    fn load_sync(&mut self, _ctx: &egui::Context) {
+        let Some(path) = self.image_paths.get(self.current_index).cloned() else {
             return;
         };
         let file_index = self.current_index;
 
-        // Check LRU decode cache first — skip decode on revisits
-        if let Some(cached_image) = self.decode_cache.get(file_index) {
-            let t0 = Instant::now();
-            let cached_image = cached_image.clone();
-            let clone_ms = t0.elapsed().as_secs_f64() * 1000.0;
-
-            let t1 = Instant::now();
-            if let Some(tex) = &mut self.current_texture {
-                tex.set(cached_image, egui::TextureOptions::LINEAR);
-            } else {
-                self.current_texture = Some(ctx.load_texture(
-                    "slider_sync",
-                    cached_image,
-                    egui::TextureOptions::LINEAR,
-                ));
-            }
-            let upload_ms = t1.elapsed().as_secs_f64() * 1000.0;
-
-            log::debug!(
-                "LRU hit [{}]: clone={:.1}ms upload={:.1}ms",
-                file_index, clone_ms, upload_ms,
-            );
+        // LRU hit — texture is already on the GPU, no upload.
+        if let Some(cached_handle) = self.decode_cache.get(file_index) {
+            self.current_texture = Some(cached_handle);
+            log::debug!("LRU hit [{}]", file_index);
             return;
         }
 
         let t0 = Instant::now();
-        match image::open(path) {
+        match image::open(&path) {
             Ok(img) => {
                 let decode_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
@@ -132,27 +116,21 @@ impl Pane {
                 let color_image = image_to_color_image(img);
                 let convert_ms = t1.elapsed().as_secs_f64() * 1000.0;
 
-                let t2 = Instant::now();
-                self.decode_cache.insert(file_index, color_image.clone());
-                let cache_ms = t2.elapsed().as_secs_f64() * 1000.0;
-
                 let size = color_image.size;
-                let t3 = Instant::now();
-                if let Some(tex) = &mut self.current_texture {
-                    tex.set(color_image, egui::TextureOptions::LINEAR);
-                } else {
-                    self.current_texture = Some(ctx.load_texture(
-                        "slider_sync",
-                        color_image,
-                        egui::TextureOptions::LINEAR,
-                    ));
-                }
-                let upload_ms = t3.elapsed().as_secs_f64() * 1000.0;
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "slider_sync".into());
+
+                let t2 = Instant::now();
+                let handle = self.decode_cache.insert(file_index, name, color_image);
+                let upload_ms = t2.elapsed().as_secs_f64() * 1000.0;
+                self.current_texture = Some(handle);
 
                 log::debug!(
-                    "load_sync [{}] ({}x{}): decode={:.1}ms convert={:.1}ms cache={:.1}ms upload={:.1}ms total={:.1}ms [LRU: {} / {:.0} MB]",
+                    "load_sync [{}] ({}x{}): decode={:.1}ms convert={:.1}ms upload={:.1}ms total={:.1}ms [LRU: {} / {:.0} MB]",
                     file_index, size[0], size[1],
-                    decode_ms, convert_ms, cache_ms, upload_ms,
+                    decode_ms, convert_ms, upload_ms,
                     t0.elapsed().as_secs_f64() * 1000.0,
                     self.decode_cache.len(),
                     self.decode_cache.total_mb(),
@@ -290,11 +268,8 @@ impl Pane {
         }
     }
 
-    /// Finalize after slider drag released: cancel throttle, re-center cache.
+    /// Finalize after slider drag released: re-center cache.
     pub(crate) fn apply_slider_release(&mut self) {
-        if let Some(loader) = &mut self.slider_loader {
-            loader.cancel();
-        }
         if let Some(cache) = &mut self.cache {
             cache.jump_to(self.current_index, &self.image_paths);
             if let Some(t) = cache.current_texture_for(self.current_index) {

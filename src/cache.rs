@@ -12,7 +12,6 @@ const COL_EMPTY: egui::Color32 = egui::Color32::from_rgb(60, 60, 60);
 pub struct DecodeResult {
     pub file_index: usize,
     pub image: Option<egui::ColorImage>,
-    #[allow(dead_code)]
     pub decode_ms: f64,
 }
 
@@ -31,11 +30,27 @@ pub struct SlidingWindowCache {
     rx: mpsc::Receiver<DecodeResult>,
     in_flight: HashSet<usize>,
 
+    /// Completed decodes waiting for GPU upload. `poll()` drains `rx` into
+    /// this queue and uploads up to `UPLOADS_PER_FRAME` per frame.
+    pending_uploads: VecDeque<(usize, egui::ColorImage, String)>,
+
+    /// Decode requests waiting for a thread slot. `spawn_load` pushes here
+    /// when the concurrent limit is reached; `poll` spawns the next one
+    /// when a decode completes and frees a slot.
+    pending_decodes: VecDeque<(usize, PathBuf)>,
+
+    max_decode_threads: usize,
+
     ctx: egui::Context,
 }
 
+/// Maximum number of GPU uploads issued by `SlidingWindowCache::poll` per
+/// frame.
+const UPLOADS_PER_FRAME: usize = 2;
+
+
 impl SlidingWindowCache {
-    pub fn new(ctx: &egui::Context, cache_count: usize) -> Self {
+    pub fn new(ctx: &egui::Context, cache_count: usize, decode_threads: usize) -> Self {
         let cache_size = cache_count * 2 + 1;
         let (tx, rx) = mpsc::channel();
 
@@ -46,6 +61,9 @@ impl SlidingWindowCache {
             tx,
             rx,
             in_flight: HashSet::new(),
+            pending_uploads: VecDeque::new(),
+            pending_decodes: VecDeque::new(),
+            max_decode_threads: decode_threads,
             ctx: ctx.clone(),
         }
     }
@@ -65,6 +83,8 @@ impl SlidingWindowCache {
         // Drain any pending results from previous window
         while self.rx.try_recv().is_ok() {}
         self.in_flight.clear();
+        self.pending_uploads.clear();
+        self.pending_decodes.clear();
 
         let cache_size = self.cache_size();
 
@@ -97,18 +117,48 @@ impl SlidingWindowCache {
 
     /// Poll for completed background decodes and upload textures.
     /// Call this every frame from `update()`.
+    ///
+    /// Drains completed background decodes into `pending_uploads`, then
+    /// issues up to `UPLOADS_PER_FRAME` GPU uploads per call.
     pub fn poll(&mut self, image_paths: &[PathBuf]) {
+        // Phase 1: drain decode results into the upload queue.
         while let Ok(result) = self.rx.try_recv() {
             self.in_flight.remove(&result.file_index);
+            if let Some(color_image) = result.image {
+                log::debug!(
+                    "bg decode [{}]: {:.1}ms",
+                    result.file_index,
+                    result.decode_ms,
+                );
+                let name = image_paths
+                    .get(result.file_index)
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                self.pending_uploads
+                    .push_back((result.file_index, color_image, name));
+            }
 
-            let slot_idx = self.slot_index_for(result.file_index);
-            if let Some(slot_idx) = slot_idx {
-                if let Some(color_image) = result.image {
-                    let name = image_paths
-                        .get(result.file_index)
-                        .and_then(|p| p.file_name())
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
+            // A decode slot freed up — spawn the next queued decode if any.
+            while self.in_flight.len() < self.max_decode_threads {
+                if let Some((idx, path)) = self.pending_decodes.pop_front() {
+                    if self.slot_index_for(idx).is_some() {
+                        self.spawn_thread(idx, &path);
+                    }
+                    // else: stale, skip and try the next
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Phase 2: upload at most UPLOADS_PER_FRAME.
+        for _ in 0..UPLOADS_PER_FRAME {
+            let Some((file_index, color_image, name)) = self.pending_uploads.pop_front() else {
+                break;
+            };
+            if let Some(slot_idx) = self.slot_index_for(file_index) {
+                if self.slots[slot_idx].is_none() {
                     let texture = self.ctx.load_texture(
                         name,
                         color_image,
@@ -117,7 +167,10 @@ impl SlidingWindowCache {
                     self.slots[slot_idx] = Some(texture);
                 }
             }
-            // else: stale result for index outside current window, drop
+        }
+
+        if !self.pending_uploads.is_empty() || !self.pending_decodes.is_empty() {
+            self.ctx.request_repaint();
         }
     }
 
@@ -188,6 +241,10 @@ impl SlidingWindowCache {
         self.initialize(current_index, image_paths);
     }
 
+    pub fn set_decode_threads(&mut self, n: usize) {
+        self.max_decode_threads = n.max(1);
+    }
+
     /// Returns a compact summary of the cache window for debug logging.
     /// Format: `[first..last] loaded/total inflight=N`
     pub fn summary(&self) -> String {
@@ -235,11 +292,26 @@ impl SlidingWindowCache {
         }
     }
 
-    /// Spawn a background thread to decode an image.
+    /// Queue a background decode. If fewer than `self.max_decode_threads`
+    /// threads are running, spawns immediately; otherwise queues until a
+    /// slot opens in `poll`.
     fn spawn_load(&mut self, file_index: usize, path: &Path) {
         if self.in_flight.contains(&file_index) {
             return;
         }
+        if self.pending_decodes.iter().any(|(idx, _)| *idx == file_index) {
+            return;
+        }
+
+        if self.in_flight.len() < self.max_decode_threads {
+            self.spawn_thread(file_index, path);
+        } else {
+            self.pending_decodes.push_back((file_index, path.to_path_buf()));
+        }
+    }
+
+    /// Actually spawn the decode thread.
+    fn spawn_thread(&mut self, file_index: usize, path: &Path) {
         self.in_flight.insert(file_index);
 
         let path = path.to_path_buf();
@@ -435,85 +507,96 @@ impl SliderLoader {
         }
     }
 
-    /// Reset on slider release.
-    pub fn cancel(&mut self) {
-        // nothing to clean up
-    }
 }
 
-/// LRU cache of decoded images, keyed by file index.
+/// LRU cache of uploaded GPU textures, keyed by file index.
 ///
-/// Stores decoded `ColorImage` in CPU memory so that revisiting an image
-/// during slider scrubbing skips the ~90ms decode. This is the egui
-/// equivalent of iced's raster cache where `Memory::Device(entry)` returns
-/// instantly for previously-loaded images.
+/// On a hit, returns the existing `TextureHandle` directly — no CPU→GPU
+/// upload needed. On a miss, uploads the decoded pixels once and stores
+/// the resulting handle. LRU eviction drops the handle, which drops the
+/// GPU allocation on the next `TextureDelta::Free` tick.
 ///
-/// Uses a memory budget (in bytes) instead of a fixed entry count so the
-/// cache self-adjusts for any resolution: 4K images (~32 MB each) get fewer
-/// entries than 1080p images (~8 MB each) for the same budget.
+/// Uses a byte budget rather than a fixed entry count so the cache
+/// self-adjusts for any resolution: 4K textures (~32 MB each) get fewer
+/// entries than 1080p (~8 MB each) for the same budget. Bytes are
+/// computed as `width × height × 4` (RGBA), matching how egui sizes
+/// uploaded textures.
 pub struct DecodeLruCache {
-    /// Map from file_index → decoded ColorImage
-    entries: HashMap<usize, egui::ColorImage>,
-    /// Access order for LRU eviction — most recently used at the back
+    /// Map from file_index → uploaded texture handle.
+    entries: HashMap<usize, egui::TextureHandle>,
+    /// Access order for LRU eviction — most recently used at the back.
     order: VecDeque<usize>,
-    /// Maximum total bytes for cached images
+    /// Maximum total bytes for cached textures.
     budget_bytes: usize,
-    /// Current total bytes of cached images
+    /// Current total bytes of cached textures.
     total_bytes: usize,
+    /// egui context for uploading via `load_texture`.
+    ctx: egui::Context,
 }
 
 impl DecodeLruCache {
-    pub fn new(budget_mb: usize) -> Self {
+    pub fn new(ctx: &egui::Context, budget_mb: usize) -> Self {
         Self {
             entries: HashMap::new(),
             order: VecDeque::new(),
             budget_bytes: budget_mb * 1024 * 1024,
             total_bytes: 0,
+            ctx: ctx.clone(),
         }
     }
 
-    /// Byte size of a ColorImage (width × height × 4 bytes per Color32).
-    fn image_bytes(image: &egui::ColorImage) -> usize {
-        image.size[0] * image.size[1] * 4
+    /// Byte size of a handle's underlying texture (width × height × 4).
+    fn handle_bytes(handle: &egui::TextureHandle) -> usize {
+        let size = handle.size();
+        size[0] * size[1] * 4
     }
 
-    /// Get a decoded image if cached. Moves entry to most-recently-used.
-    pub fn get(&mut self, file_index: usize) -> Option<&egui::ColorImage> {
+    /// Get the cached texture for `file_index`, if any. Marks MRU.
+    pub fn get(&mut self, file_index: usize) -> Option<egui::TextureHandle> {
         if self.entries.contains_key(&file_index) {
-            // Move to back (most recently used)
             self.order.retain(|&i| i != file_index);
             self.order.push_back(file_index);
-            self.entries.get(&file_index)
+            self.entries.get(&file_index).cloned()
         } else {
             None
         }
     }
 
-    /// Insert a decoded image. Evicts least recently used entries until the
-    /// total stays within the memory budget.
-    pub fn insert(&mut self, file_index: usize, image: egui::ColorImage) {
-        let new_bytes = Self::image_bytes(&image);
+    /// Upload a decoded image as a new GPU texture, store as MRU, and
+    /// evict LRU entries until within budget. Returns the new handle.
+    pub fn insert(
+        &mut self,
+        file_index: usize,
+        name: impl Into<String>,
+        image: egui::ColorImage,
+    ) -> egui::TextureHandle {
+        let new_bytes = image.size[0] * image.size[1] * 4;
 
-        // If replacing an existing entry, remove its bytes first
+        // If replacing an existing entry, drop its bytes first.
         if let Some(old) = self.entries.remove(&file_index) {
-            self.total_bytes -= Self::image_bytes(&old);
+            self.total_bytes -= Self::handle_bytes(&old);
             self.order.retain(|&i| i != file_index);
         }
 
-        // Evict LRU entries until there's room
+        // Evict LRU until there's room. Do this before the upload so the
+        // gpu_allocator sees the freed textures first (drop happens
+        // synchronously here, but the GPU free is processed at the next
+        // TextureDelta flush).
         while self.total_bytes + new_bytes > self.budget_bytes {
             if let Some(evicted) = self.order.pop_front() {
-                if let Some(img) = self.entries.remove(&evicted) {
-                    self.total_bytes -= Self::image_bytes(&img);
+                if let Some(h) = self.entries.remove(&evicted) {
+                    self.total_bytes -= Self::handle_bytes(&h);
                 }
             } else {
                 break;
             }
         }
 
+        let handle = self.ctx.load_texture(name, image, egui::TextureOptions::LINEAR);
         self.total_bytes += new_bytes;
-        self.entries.insert(file_index, image);
+        self.entries.insert(file_index, handle.clone());
         self.order.push_back(file_index);
+        handle
     }
 
     pub fn len(&self) -> usize {
@@ -535,8 +618,8 @@ impl DecodeLruCache {
         self.budget_bytes = budget_mb * 1024 * 1024;
         while self.total_bytes > self.budget_bytes {
             if let Some(evicted) = self.order.pop_front() {
-                if let Some(img) = self.entries.remove(&evicted) {
-                    self.total_bytes -= Self::image_bytes(&img);
+                if let Some(h) = self.entries.remove(&evicted) {
+                    self.total_bytes -= Self::handle_bytes(&h);
                 }
             } else {
                 break;
