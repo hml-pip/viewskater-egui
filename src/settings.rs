@@ -165,6 +165,7 @@ pub struct AppSettings {
     pub lru_budget_mb: usize,
     pub decode_threads: usize,
     pub gpu_memory_mode: GpuMemoryMode,
+    pub mouse_wheel_zoom: bool,
 }
 
 impl Default for AppSettings {
@@ -178,6 +179,7 @@ impl Default for AppSettings {
             lru_budget_mb: 1024,
             decode_threads: 10,
             gpu_memory_mode: GpuMemoryMode::default(),
+            mouse_wheel_zoom: false,
         }
     }
 }
@@ -236,6 +238,7 @@ pub fn show_settings_modal(
     let prev_cache_count = settings.cache_count;
     let prev_lru_budget = settings.lru_budget_mb;
     let prev_decode_threads = settings.decode_threads;
+    let prev_mouse_wheel_zoom = settings.mouse_wheel_zoom;
 
     // Semi-transparent backdrop
     let screen = ctx.screen_rect();
@@ -275,6 +278,22 @@ pub fn show_settings_modal(
                     egui::ScrollArea::vertical()
                         .auto_shrink([false, true])
                         .show(ui, |ui| {
+                    // Control section
+                    ui.label(egui::RichText::new("Control")
+                            .size(14.0)
+                            .color(theme.heading),
+                    );
+                    ui.add_space(4.0);
+                    egui::Frame::default()
+                        .fill(theme.section_bg)
+                        .corner_radius(6.0)
+                        .inner_margin(10.0)
+                        .show(ui, |ui|{
+                            ui.horizontal(|ui|{
+                                toggle_switch(ui, &mut settings.mouse_wheel_zoom, "Mouse Wheel Zoom", theme);
+                            });
+                        });
+
 
                     // Display section
                     ui.label(
@@ -460,4 +479,5 @@ pub fn show_settings_modal(
     settings.cache_count != prev_cache_count
         || settings.lru_budget_mb != prev_lru_budget
         || settings.decode_threads != prev_decode_threads
+        || settings.mouse_wheel_zoom != prev_mouse_wheel_zoom
 }

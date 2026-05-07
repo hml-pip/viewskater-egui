@@ -23,10 +23,11 @@ pub(crate) struct Pane {
     pub(crate) lru_budget_mb: usize,
     pub(crate) decode_threads: usize,
     pub(crate) selected: bool,
+    pub(crate) mouse_wheel_zoom: bool,
 }
 
 impl Pane {
-    pub(crate) fn new(ctx: &egui::Context, cache_count: usize, lru_budget_mb: usize, decode_threads: usize) -> Self {
+    pub(crate) fn new(ctx: &egui::Context, cache_count: usize, lru_budget_mb: usize, decode_threads: usize, mouse_wheel_zoom: bool) -> Self {
         Self {
             image_paths: Vec::new(),
             current_index: 0,
@@ -40,6 +41,7 @@ impl Pane {
             lru_budget_mb,
             decode_threads,
             selected: true,
+            mouse_wheel_zoom,
         }
     }
 
@@ -339,22 +341,18 @@ impl Pane {
 
         // Zoom: scroll wheel + pinch-to-zoom
         if response.hovered() {
-            let (scroll, pinch) = ui.input(|i| (i.raw_scroll_delta.y, i.zoom_delta()));
-            let scroll_factor = if scroll != 0.0 {
-                (scroll * 0.003).exp()
+            if self.mouse_wheel_zoom {
+                self.zoom_image(ui, &response, &available);
             } else {
-                1.0
-            };
-            let zoom_factor = pinch * scroll_factor;
-
-            if zoom_factor != 1.0 {
-                let old_zoom = self.zoom;
-                self.zoom = (self.zoom * zoom_factor).clamp(MIN_ZOOM, MAX_ZOOM);
-
-                if let Some(hover_pos) = response.hover_pos() {
-                    let old_center = available.center() + self.pan;
-                    let cursor_rel = hover_pos - old_center;
-                    self.pan += cursor_rel * (1.0 - self.zoom / old_zoom);
+                if ui.input(|i| i.modifiers.command) {
+                    self.zoom_image(ui, &response, &available);
+                } else {
+                    let delta = ui.input(|i| i.raw_scroll_delta.y);
+                    if delta > 0.0 {
+                        self.navigate(-1);
+                    } else if delta < 0.0 {
+                        self.navigate(1);
+                    }
                 }
             }
         }
@@ -383,5 +381,27 @@ impl Pane {
         painter.image(tex.id(), display_rect, uv, egui::Color32::WHITE);
 
         self.zoom != old_zoom || self.pan != old_pan
+    }
+
+    // Zoom: scroll wheel + pinch-to-zoom
+    fn zoom_image(&mut self, ui: &mut egui::Ui, response: &egui::Response, available: &egui::Rect) {
+        let (scroll, pinch) = ui.input(|i| (i.raw_scroll_delta.y, i.zoom_delta()));
+        let scroll_factor = if scroll != 0.0 {
+            (scroll * 0.003).exp()
+        } else {
+            1.0
+        };
+        let zoom_factor = pinch * scroll_factor;
+
+        if zoom_factor != 1.0 {
+            let old_zoom = self.zoom;
+            self.zoom = (self.zoom * zoom_factor).clamp(MIN_ZOOM, MAX_ZOOM);
+
+            if let Some(hover_pos) = response.hover_pos() {
+                let old_center = available.center() + self.pan;
+                let cursor_rel = hover_pos - old_center;
+                self.pan += cursor_rel * (1.0 - self.zoom / old_zoom);
+            }
+        }
     }
 }
