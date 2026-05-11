@@ -110,7 +110,7 @@ pub struct App {
     pub(crate) show_about: bool,
     pub(crate) menu_open: bool,
     pub(crate) log_buffer: Arc<Mutex<VecDeque<String>>>,
-    initial_size_set: bool,
+    needs_dpi_resize: bool,
     file_receiver: Receiver<PathBuf>,
 }
 
@@ -121,6 +121,7 @@ impl App {
         log_buffer: Arc<Mutex<VecDeque<String>>>,
         settings: AppSettings,
         file_receiver: Receiver<PathBuf>,
+        needs_dpi_resize: bool,
     ) -> Self {
         let theme = UiTheme::teal_dark();
         theme.apply_to_visuals(&cc.egui_ctx);
@@ -135,7 +136,7 @@ impl App {
             show_about: false,
             menu_open: false,
             log_buffer,
-            initial_size_set: false,
+            needs_dpi_resize,
             file_receiver,
         };
 
@@ -443,11 +444,11 @@ impl eframe::App for App {
         // Force dark theme every frame (egui_winit can reapply system theme on macOS)
         self.theme.apply_to_visuals(ctx);
 
-        // On first frame, resize to achieve the target physical pixel size.
-        // egui's with_inner_size uses logical points, so on scaled displays
-        // (e.g. 1.25x) 1280x720 logical becomes 1600x900 physical. The iced
-        // version uses PhysicalSize directly, so it doesn't have this issue.
-        if !self.initial_size_set {
+        // On first launch (no persisted state), resize to achieve the target
+        // physical pixel size. egui's with_inner_size uses logical points, so
+        // on scaled displays (e.g. 1.25x) 1280x720 logical becomes 1600x900
+        // physical. Skip when eframe persistence restored a previous size.
+        if self.needs_dpi_resize {
             if let Some(ppp) = ctx.input(|i| i.viewport().native_pixels_per_point) {
                 if (ppp - 1.0).abs() > 0.01 {
                     let logical = egui::vec2(
@@ -457,7 +458,7 @@ impl eframe::App for App {
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(logical));
                 }
             }
-            self.initial_size_set = true;
+            self.needs_dpi_resize = false;
         }
 
         for pane in &mut self.panes {
