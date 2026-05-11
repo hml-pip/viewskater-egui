@@ -339,22 +339,11 @@ impl Pane {
 
         let response = ui.allocate_rect(available, egui::Sense::click_and_drag());
 
-        // Zoom: scroll wheel + pinch-to-zoom
-        if response.hovered() {
-            if self.mouse_wheel_zoom {
-                self.zoom_image(ui, &response, &available);
-            } else {
-                if ui.input(|i| i.modifiers.command) {
-                    self.zoom_image(ui, &response, &available);
-                } else {
-                    let delta = ui.input(|i| i.raw_scroll_delta.y);
-                    if delta > 0.0 {
-                        self.navigate(-1);
-                    } else if delta < 0.0 {
-                        self.navigate(1);
-                    }
-                }
-            }
+        // Zoom: scroll wheel (when enabled) or Ctrl/Cmd+scroll, plus pinch-to-zoom
+        if response.hovered()
+            && (self.mouse_wheel_zoom || ui.input(|i| i.modifiers.command))
+        {
+            self.zoom_image(ui, &response, &available);
         }
 
         // Pan: drag
