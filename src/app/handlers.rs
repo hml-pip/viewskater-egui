@@ -14,7 +14,7 @@ impl App {
 
     pub(super) fn set_dual_pane(&mut self, ctx: &egui::Context) {
         if self.panes.len() < 2 {
-            let mut pane = Pane::new(ctx, self.settings.cache_count, self.settings.lru_budget_mb, self.settings.decode_threads);
+            let mut pane = Pane::new(ctx, self.settings.cache_count, self.settings.lru_budget_mb, self.settings.decode_threads, self.settings.mouse_wheel_zoom);
             if !self.panes[0].image_paths.is_empty() {
                 if let Some(dir) = self.panes[0].image_paths[0].parent() {
                     pane.open_path(dir, ctx);
@@ -149,6 +149,7 @@ impl App {
             pane.cache_count = self.settings.cache_count;
             pane.lru_budget_mb = self.settings.lru_budget_mb;
             pane.decode_threads = self.settings.decode_threads;
+            pane.mouse_wheel_zoom = self.settings.mouse_wheel_zoom;
         }
     }
 
@@ -162,7 +163,7 @@ impl App {
              nav_right_held, nav_left_held, set_single, set_dual,
              set_independent, select_pane1, select_pane2,
              toggle_footer, open_folder, open_file, close, quit,
-             toggle_fullscreen, escape) =
+             toggle_fullscreen, escape, scroll_delta, command_held) =
             ctx.input(|i| {
                 (
                     i.key_pressed(egui::Key::Home),
@@ -184,6 +185,8 @@ impl App {
                     i.key_pressed(egui::Key::Q) && i.modifiers.command,
                     i.key_pressed(egui::Key::F11),
                     i.key_pressed(egui::Key::Escape),
+                    i.raw_scroll_delta.y,
+                    i.modifiers.command,
                 )
             });
 
@@ -301,6 +304,22 @@ impl App {
             if any_can {
                 ctx.request_repaint();
             }
+        }
+
+        if !self.settings.mouse_wheel_zoom && !command_held && scroll_delta != 0.0 {
+            let dir: isize = if scroll_delta > 0.0 { -1 } else { 1 };
+            let all_ready = self.panes.iter().all(|p| {
+                !is_active(p) || p.image_paths.is_empty() || p.is_next_cached(dir)
+            });
+            if all_ready {
+                let any_advanced = self.panes.iter_mut().fold(false, |acc, p| {
+                    if is_active(p) { p.navigate(dir) || acc } else { acc }
+                });
+                if any_advanced {
+                    self.perf.record_image_load();
+                }
+            }
+            ctx.request_repaint();
         }
     }
 
