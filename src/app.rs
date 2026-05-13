@@ -22,9 +22,11 @@ const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 const FULLSCREEN_TOP_ZONE: f32 = 50.0;
 const FULLSCREEN_BOTTOM_ZONE: f32 = 100.0;
 
-/// Thumbnail UI size
+/// Thumbnail image size
 pub const THUMBNAIL_WIDTH: f32 = 400.0;
 pub const THUMBNAIL_HEIGHT: f32 = 300.0;
+/// Preview UI screen size ratio
+const SCREEN_PREVIEW_UI_RATIO: f32 = 5.0;
 
 #[cfg(target_os = "windows")]
 const CJK_PATHS: [&str; 2] = [
@@ -120,7 +122,13 @@ pub(crate) fn paint_nav_slider(
         accent,
         egui::Stroke::NONE,
     );
-
+    let screen_rect = ui.ctx().screen_rect();
+    let mut ui_width = (screen_rect.width()/SCREEN_PREVIEW_UI_RATIO).max(THUMBNAIL_WIDTH);
+    let mut ui_height = (screen_rect.height()/SCREEN_PREVIEW_UI_RATIO).max(THUMBNAIL_HEIGHT);
+    if ui_width >= screen_rect.width() || ui_height >= screen_rect.height() {
+        ui_width /= 2.0;
+        ui_height /= 2.0;
+    }
     if let Some(pos) = response.hover_pos() {
         let usable = rect.x_range().shrink(handle_radius);
         let drag_t = ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
@@ -130,18 +138,12 @@ pub(crate) fn paint_nav_slider(
             egui::show_tooltip_at(ui.ctx(), ui.layer_id(), egui::Id::new("preview"), po, |ui| {
                 if let Some(swc) = pane.cache.as_mut() {
                     let (response, painter) = ui.allocate_painter(
-                        egui::Vec2::new(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT), egui::Sense::empty());
+                        egui::Vec2::new(ui_width, ui_height), egui::Sense::empty());
                     if let Some(tex) = swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index]) {
                         let tex_size = tex.size_vec2();
                         let available = response.rect;
-
-                        if available.width() <= 0.0 || available.height() <= 0.0 {
-                            return;
-                        }
-                        if tex_size.x <= 0.0 || tex_size.y <= 0.0 {
-                            return;
-                        }
-                        let display_rect = egui::Rect::from_center_size(available.center(), tex_size);
+                        let ratio = (ui_width / tex_size.x).min(ui_height/tex_size.y);
+                        let display_rect = egui::Rect::from_center_size(available.center(), tex_size * ratio);
                         let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                         painter.image(tex.id(), display_rect, uv, egui::Color32::WHITE);
                     }
@@ -230,7 +232,6 @@ impl App {
         if !cjk_loaded {
             log::info!("No CJK font found — CJK characters will render as missing glyphs");
         } else {
-            log::info!("{}", fonts.families.iter().count());
             cc.egui_ctx.set_fonts(fonts);
         }
 

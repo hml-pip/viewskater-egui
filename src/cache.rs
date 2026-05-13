@@ -172,7 +172,7 @@ impl SlidingWindowCache {
                     );
                     self.slots[slot_idx] = Some(texture);
 
-                    if self.thumbnails.get(&file_index).is_none() {
+                    if !self.thumbnails.contains_key(&file_index) {
                         let texture = self.ctx.load_texture(
                             format!("{}t", name),
                             thumbnail,
@@ -516,7 +516,7 @@ impl SlidingWindowCache {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
                     let tex = Some(ctx.load_texture(format!("{}t", name), thumbnail, egui::TextureOptions::LINEAR));
-                    log::info!("{} thumbnail generated", path.display().to_string());
+                    log::info!("{} thumbnail generated", path.display());
                     tex
             }
             Err(e) => {
