@@ -26,6 +26,26 @@ const FULLSCREEN_BOTTOM_ZONE: f32 = 100.0;
 pub const THUMBNAIL_WIDTH: f32 = 400.0;
 pub const THUMBNAIL_HEIGHT: f32 = 300.0;
 
+#[cfg(target_os = "windows")]
+const CJK_PATHS: [&str; 2] = [
+    "C:\\Windows\\Fonts\\msyh.ttc",
+    "C:\\Windows\\Fonts\\simsun.ttc",
+];
+
+#[cfg(target_os = "linux")]
+const CJK_PATHS: [&str; 3] = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+];
+
+#[cfg(target_os = "macos")]
+const CJK_PATHS: [&str; 3] = [
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+];
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum DualPaneMode {
     Synced,
@@ -187,6 +207,31 @@ impl App {
 
         if app.panes[0].current_texture.is_some() {
             app.perf.record_image_load();
+        }
+
+        let mut fonts = egui::FontDefinitions::default();
+        let mut cjk_loaded = false;
+        for path in &CJK_PATHS {
+            if let Ok(data) = std::fs::read(path) {
+                fonts.font_data.insert(
+                    "cjk_fallback".to_string(),
+                    egui::FontData::from_owned(data).into(),
+                );
+                fonts.families.entry(egui::FontFamily::Monospace)
+                    .or_default()
+                    .push("cjk_fallback".to_string());
+                fonts.families.entry(egui::FontFamily::Proportional)
+                    .or_default()
+                    .push("cjk_fallback".to_string());
+                cjk_loaded = true;
+                break;
+            }
+        }
+        if !cjk_loaded {
+            log::info!("No CJK font found — CJK characters will render as missing glyphs");
+        } else {
+            log::info!("{}", fonts.families.iter().count());
+            cc.egui_ctx.set_fonts(fonts);
         }
 
         app
