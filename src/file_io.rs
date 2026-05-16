@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
+use image::{DynamicImage, ImageReader, ImageResult};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 const APP_NAME: &str = "viewskater-egui";
@@ -46,6 +47,11 @@ pub fn enumerate_images(dir: &Path) -> Vec<PathBuf> {
 
     log::info!("Found {} images in {}", paths.len(), dir.display());
     paths
+}
+
+/// Convenience wrapper around ImageReader::open().with_guessed_format().decode()
+pub fn open_image(path: &Path) -> ImageResult<DynamicImage> {
+    ImageReader::open(path)?.with_guessed_format()?.decode()
 }
 
 /// Resolve a CLI path to a directory and an optional target filename.
@@ -147,7 +153,8 @@ pub fn get_log_directory() -> PathBuf {
 
 pub fn setup_panic_hook(log_buffer: Arc<Mutex<VecDeque<String>>>) {
     let log_file_path = get_log_directory().join("panic.log");
-    std::fs::create_dir_all(log_file_path.parent().unwrap()).expect("Failed to create log directory");
+    std::fs::create_dir_all(log_file_path.parent().unwrap())
+        .expect("Failed to create log directory");
 
     std::panic::set_hook(Box::new(move |info| {
         let backtrace = std::backtrace::Backtrace::force_capture();

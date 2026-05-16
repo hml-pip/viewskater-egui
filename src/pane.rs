@@ -5,7 +5,7 @@ use eframe::egui;
 
 use crate::cache;
 use crate::decode::image_to_color_image;
-use crate::file_io;
+use crate::file_io::{self, open_image};
 
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 100.0;
@@ -27,7 +27,13 @@ pub(crate) struct Pane {
 }
 
 impl Pane {
-    pub(crate) fn new(ctx: &egui::Context, cache_count: usize, lru_budget_mb: usize, decode_threads: usize, mouse_wheel_zoom: bool) -> Self {
+    pub(crate) fn new(
+        ctx: &egui::Context,
+        cache_count: usize,
+        lru_budget_mb: usize,
+        decode_threads: usize,
+        mouse_wheel_zoom: bool,
+    ) -> Self {
         Self {
             image_paths: Vec::new(),
             current_index: 0,
@@ -72,12 +78,9 @@ impl Pane {
 
         self.current_index = target_filename
             .and_then(|name| {
-                self.image_paths
-                    .iter()
-                    .position(|p| {
-                        p.file_name().map(|f| f.to_string_lossy().into_owned())
-                            == Some(name.clone())
-                    })
+                self.image_paths.iter().position(|p| {
+                    p.file_name().map(|f| f.to_string_lossy().into_owned()) == Some(name.clone())
+                })
             })
             .unwrap_or(0);
 
@@ -110,7 +113,7 @@ impl Pane {
         }
 
         let t0 = Instant::now();
-        match image::open(&path) {
+        match open_image(&path) {
             Ok(img) => {
                 let decode_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
@@ -170,7 +173,9 @@ impl Pane {
                 let dir = if delta > 0 { "→" } else { "←" };
                 log::debug!(
                     "nav {} {}/{} cache={} hit",
-                    dir, new_index, self.image_paths.len(),
+                    dir,
+                    new_index,
+                    self.image_paths.len(),
                     cache.summary(),
                 );
                 return true;
@@ -197,7 +202,9 @@ impl Pane {
             }
             log::debug!(
                 "jump {}/{} cache={} {}",
-                index, self.image_paths.len(), summary,
+                index,
+                self.image_paths.len(),
+                summary,
                 if hit { "hit" } else { "miss" },
             );
         } else {
@@ -206,8 +213,7 @@ impl Pane {
     }
 
     pub(crate) fn can_navigate_forward(&self) -> bool {
-        !self.image_paths.is_empty()
-            && self.current_index < self.image_paths.len() - 1
+        !self.image_paths.is_empty() && self.current_index < self.image_paths.len() - 1
     }
 
     pub(crate) fn can_navigate_backward(&self) -> bool {
@@ -279,7 +285,9 @@ impl Pane {
             }
             log::debug!(
                 "slider release {}/{} cache={}",
-                self.current_index, self.image_paths.len(), cache.summary(),
+                self.current_index,
+                self.image_paths.len(),
+                cache.summary(),
             );
         }
     }
@@ -340,9 +348,7 @@ impl Pane {
         let response = ui.allocate_rect(available, egui::Sense::click_and_drag());
 
         // Zoom: scroll wheel (when enabled) or Ctrl/Cmd+scroll, plus pinch-to-zoom
-        if response.hovered()
-            && (self.mouse_wheel_zoom || ui.input(|i| i.modifiers.command))
-        {
+        if response.hovered() && (self.mouse_wheel_zoom || ui.input(|i| i.modifiers.command)) {
             self.zoom_image(ui, &response, &available);
         }
 
