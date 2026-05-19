@@ -22,6 +22,9 @@ const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 const FULLSCREEN_TOP_ZONE: f32 = 50.0;
 const FULLSCREEN_BOTTOM_ZONE: f32 = 100.0;
 
+/// Scroll options
+const SCROLL_ZOOM_SPEED: f32 = 1.0 / 200.0;
+
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum DualPaneMode {
     Synced,
@@ -153,6 +156,8 @@ impl App {
         if app.panes[0].current_texture.is_some() {
             app.perf.record_image_load();
         }
+
+        cc.egui_ctx.options_mut(|o| o.scroll_zoom_speed = SCROLL_ZOOM_SPEED);
 
         app
     }
