@@ -123,18 +123,19 @@ pub(crate) fn paint_nav_slider(
         egui::Stroke::NONE,
     );
     let screen_rect = ui.ctx().screen_rect();
-    let mut ui_width = (screen_rect.width()/SCREEN_PREVIEW_UI_RATIO).max(THUMBNAIL_WIDTH);
-    let mut ui_height = (screen_rect.height()/SCREEN_PREVIEW_UI_RATIO).max(THUMBNAIL_HEIGHT);
+    let mut ui_width = screen_rect.width() / SCREEN_PREVIEW_UI_RATIO;
+    let mut ui_height = screen_rect.height() / SCREEN_PREVIEW_UI_RATIO;
     if ui_width >= screen_rect.width() || ui_height >= screen_rect.height() {
         ui_width /= 2.0;
         ui_height /= 2.0;
     }
     if let Some(pos) = response.hover_pos() {
         let usable = rect.x_range().shrink(handle_radius);
-        let drag_t = ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
-        let cursor_index = (max as f32 * drag_t).round() as usize;
+        let cursor_t = ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
+        let cursor_index = (max as f32 * cursor_t).round() as usize;
         if let Some(pane) = panes.get_mut(0) {
-            if cursor_index < pane.image_paths.len() {
+            // Do not show the preview while the mouse is being dragged
+            if cursor_index < pane.image_paths.len() && !response.dragged() {
                 if let Some(swc) = pane.cache.as_mut() {
                     if let Some(tex) = swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index]) {
                         let tex_size = tex.size_vec2();

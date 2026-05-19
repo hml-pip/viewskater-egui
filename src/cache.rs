@@ -101,12 +101,13 @@ impl SlidingWindowCache {
         // Clear all slots
         self.slots.clear();
         self.slots.resize(cache_size, None);
+        self.thumbnails.clear();
 
         // Synchronously decode the center image
         let center_slot = center_index - self.first_file_index;
         if let (Some(tex), Some(thumb)) = Self::decode_sync(&image_paths[center_index], &self.ctx) {
             self.slots[center_slot] = Some(tex);
-            self.thumbnails.insert(center_slot, Some(thumb));
+            self.thumbnails.insert(center_index, Some(thumb));
         }
 
         // Spawn background loads for all other valid slots
