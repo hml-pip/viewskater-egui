@@ -380,12 +380,9 @@ impl Pane {
 
     // Zoom: scroll wheel + pinch-to-zoom
     fn zoom_image(&mut self, ui: &mut egui::Ui, response: &egui::Response, available: &egui::Rect) {
-        let (scroll, pinch) = ui.input(|i| (i.raw_scroll_delta.y, i.zoom_delta()));
-        let scroll_factor = if scroll != 0.0 {
-            (scroll * 0.003).exp()
-        } else {
-            1.0
-        };
+        let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+        let scroll_zoom_speed = ui.ctx().options(|o| o.scroll_zoom_speed);
+        let scroll_factor = (scroll * scroll_zoom_speed).exp();
         let zoom_factor = pinch * scroll_factor;
 
         if zoom_factor != 1.0 {
