@@ -17,7 +17,12 @@ impl App {
             let mut pane = Pane::new(ctx, self.settings.cache_count, self.settings.lru_budget_mb, self.settings.decode_threads, self.settings.mouse_wheel_zoom);
             if !self.panes[0].image_paths.is_empty() {
                 if let Some(dir) = self.panes[0].image_paths[0].parent() {
-                    pane.open_path(dir, ctx);
+                    pane.open_path(
+                        dir,
+                        ctx,
+                        self.settings.image_sort_key,
+                        self.settings.image_sort_direction,
+                    );
                     pane.jump_to(self.panes[0].current_index, ctx);
                 }
             }
@@ -28,7 +33,12 @@ impl App {
     pub(super) fn open_folder_dialog(&mut self, pane_idx: usize, ctx: &egui::Context) {
         if let Some(pane) = self.panes.get_mut(pane_idx) {
             if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                pane.open_path(&dir, ctx);
+                pane.open_path(
+                    &dir,
+                    ctx,
+                    self.settings.image_sort_key,
+                    self.settings.image_sort_direction,
+                );
             }
         }
     }
@@ -39,7 +49,12 @@ impl App {
                 .add_filter("Images", &["jpg", "jpeg", "png", "bmp", "webp", "gif", "tiff", "tif", "qoi", "tga"])
                 .pick_file()
             {
-                pane.open_path(&file, ctx);
+                pane.open_path(
+                    &file,
+                    ctx,
+                    self.settings.image_sort_key,
+                    self.settings.image_sort_direction,
+                );
             }
         }
     }
@@ -150,6 +165,24 @@ impl App {
             pane.lru_budget_mb = self.settings.lru_budget_mb;
             pane.decode_threads = self.settings.decode_threads;
             pane.mouse_wheel_zoom = self.settings.mouse_wheel_zoom;
+        }
+    }
+
+    pub(super) fn reload_sorted_panes(&mut self, ctx: &egui::Context) {
+        for pane in &mut self.panes {
+            let Some(path) = pane.image_paths.get(pane.current_index).cloned() else {
+                continue;
+            };
+            let zoom = pane.zoom;
+            let pan = pane.pan;
+            pane.open_path(
+                &path,
+                ctx,
+                self.settings.image_sort_key,
+                self.settings.image_sort_direction,
+            );
+            pane.zoom = zoom;
+            pane.pan = pan;
         }
     }
 
@@ -329,7 +362,12 @@ impl App {
     pub(super) fn handle_external_open_requests(&mut self, ctx: &egui::Context) {
         while let Ok(path) = self.file_receiver.try_recv() {
             log::info!("External open request: {}", path.display());
-            self.panes[0].open_path(&path, ctx);
+            self.panes[0].open_path(
+                &path,
+                ctx,
+                self.settings.image_sort_key,
+                self.settings.image_sort_direction,
+            );
             if self.panes[0].current_texture.is_some() {
                 self.perf.record_image_load();
             }
@@ -358,9 +396,19 @@ impl App {
                             if pos.x < divider_x { 0 } else { 1 }
                         })
                         .unwrap_or(0);
-                    self.panes[target].open_path(path, ctx);
+                    self.panes[target].open_path(
+                        path,
+                        ctx,
+                        self.settings.image_sort_key,
+                        self.settings.image_sort_direction,
+                    );
                 } else {
-                    self.panes[0].open_path(path, ctx);
+                    self.panes[0].open_path(
+                        path,
+                        ctx,
+                        self.settings.image_sort_key,
+                        self.settings.image_sort_direction,
+                    );
                 }
             }
         }

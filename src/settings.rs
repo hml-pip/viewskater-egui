@@ -154,6 +154,56 @@ pub enum GpuMemoryMode {
     LowMemory,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageSortKey {
+    #[default]
+    Name,
+    Modified,
+    Created,
+    Size,
+    Extension,
+}
+
+impl ImageSortKey {
+    const ALL: [Self; 5] = [
+        Self::Name,
+        Self::Modified,
+        Self::Created,
+        Self::Size,
+        Self::Extension,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Modified => "Modified Date",
+            Self::Created => "Created Date",
+            Self::Size => "File Size",
+            Self::Extension => "Extension",
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortDirection {
+    #[default]
+    Ascending,
+    Descending,
+}
+
+impl SortDirection {
+    const ALL: [Self; 2] = [Self::Ascending, Self::Descending];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ascending => "Ascending",
+            Self::Descending => "Descending",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppSettings {
@@ -166,6 +216,8 @@ pub struct AppSettings {
     pub decode_threads: usize,
     pub gpu_memory_mode: GpuMemoryMode,
     pub mouse_wheel_zoom: bool,
+    pub image_sort_key: ImageSortKey,
+    pub image_sort_direction: SortDirection,
 }
 
 impl Default for AppSettings {
@@ -180,6 +232,8 @@ impl Default for AppSettings {
             decode_threads: 10,
             gpu_memory_mode: GpuMemoryMode::default(),
             mouse_wheel_zoom: false,
+            image_sort_key: ImageSortKey::default(),
+            image_sort_direction: SortDirection::default(),
         }
     }
 }
@@ -244,7 +298,7 @@ pub fn show_settings_modal(
     let screen = ctx.screen_rect();
     egui::Area::new(egui::Id::new("settings_backdrop"))
         .fixed_pos(screen.min)
-        .order(egui::Order::Foreground)
+        .order(egui::Order::Middle)
         .show(ctx, |ui| {
             let response = ui.allocate_response(screen.size(), egui::Sense::click());
             ui.painter().rect_filled(screen, 0.0, theme.backdrop);
@@ -259,7 +313,7 @@ pub fn show_settings_modal(
     // Modal card
     egui::Area::new(egui::Id::new("settings_modal"))
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .order(egui::Order::Tooltip)
+        .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             egui::Frame::default()
                 .fill(theme.card_bg)
@@ -294,6 +348,51 @@ pub fn show_settings_modal(
                             });
                         });
 
+                    ui.add_space(12.0);
+
+                    // Files section
+                    ui.label(
+                        egui::RichText::new("Files")
+                            .size(14.0)
+                            .color(theme.heading),
+                    );
+                    ui.add_space(4.0);
+                    egui::Frame::default()
+                        .fill(theme.section_bg)
+                        .corner_radius(6.0)
+                        .inner_margin(10.0)
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Sort By");
+                                egui::ComboBox::from_id_salt("image_sort_key")
+                                    .selected_text(settings.image_sort_key.label())
+                                    .show_ui(ui, |ui| {
+                                        for sort_key in ImageSortKey::ALL {
+                                            ui.selectable_value(
+                                                &mut settings.image_sort_key,
+                                                sort_key,
+                                                sort_key.label(),
+                                            );
+                                        }
+                                    });
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("Direction");
+                                egui::ComboBox::from_id_salt("image_sort_direction")
+                                    .selected_text(settings.image_sort_direction.label())
+                                    .show_ui(ui, |ui| {
+                                        for direction in SortDirection::ALL {
+                                            ui.selectable_value(
+                                                &mut settings.image_sort_direction,
+                                                direction,
+                                                direction.label(),
+                                            );
+                                        }
+                                    });
+                            });
+                        });
+
+                    ui.add_space(12.0);
 
                     // Display section
                     ui.label(

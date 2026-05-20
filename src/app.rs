@@ -142,11 +142,21 @@ impl App {
         };
 
         if !paths.is_empty() {
-            app.panes[0].open_path(&paths[0], &cc.egui_ctx);
+            app.panes[0].open_path(
+                &paths[0],
+                &cc.egui_ctx,
+                app.settings.image_sort_key,
+                app.settings.image_sort_direction,
+            );
         }
         if paths.len() >= 2 {
             let mut pane1 = Pane::new(&cc.egui_ctx, app.settings.cache_count, app.settings.lru_budget_mb, app.settings.decode_threads, app.settings.mouse_wheel_zoom);
-            pane1.open_path(&paths[1], &cc.egui_ctx);
+            pane1.open_path(
+                &paths[1],
+                &cc.egui_ctx,
+                app.settings.image_sort_key,
+                app.settings.image_sort_direction,
+            );
             app.panes.push(pane1);
         }
 
@@ -573,8 +583,14 @@ impl eframe::App for App {
         }
 
         // Settings modal — auto-saves on any change inside the modal.
+        let settings_before = self.settings.clone();
         let perf_changed =
             settings::show_settings_modal(ctx, &mut self.settings, &mut self.show_settings, &self.theme);
+        let sort_changed = self.settings.image_sort_key != settings_before.image_sort_key
+            || self.settings.image_sort_direction != settings_before.image_sort_direction;
+        if sort_changed {
+            self.reload_sorted_panes(ctx);
+        }
         if perf_changed {
             self.apply_settings_to_caches();
         }
