@@ -238,6 +238,12 @@ impl Default for AppSettings {
     }
 }
 
+#[derive(Default)]
+pub struct SettingsChanges {
+    pub pane_settings: bool,
+    pub sort_order: bool,
+}
+
 impl AppSettings {
     fn config_path() -> Option<PathBuf> {
         dirs::config_dir().map(|d| d.join("viewskater-egui").join("settings.yaml"))
@@ -271,15 +277,15 @@ impl AppSettings {
     }
 }
 
-/// Show the settings modal. Returns true if performance settings (cache_count or lru_budget_mb) changed.
+/// Show the settings modal and report which settings changed.
 pub fn show_settings_modal(
     ctx: &egui::Context,
     settings: &mut AppSettings,
     show: &mut bool,
     theme: &UiTheme,
-) -> bool {
+) -> SettingsChanges {
     if !*show {
-        return false;
+        return SettingsChanges::default();
     }
 
     // Snapshot at start of frame; if anything changes we save immediately
@@ -288,11 +294,6 @@ pub fn show_settings_modal(
 
     let saved_at_id = egui::Id::new("settings_saved_at");
     let now = ctx.input(|i| i.time);
-
-    let prev_cache_count = settings.cache_count;
-    let prev_lru_budget = settings.lru_budget_mb;
-    let prev_decode_threads = settings.decode_threads;
-    let prev_mouse_wheel_zoom = settings.mouse_wheel_zoom;
 
     // Semi-transparent backdrop
     let screen = ctx.screen_rect();
@@ -575,8 +576,12 @@ pub fn show_settings_modal(
         ctx.data_mut(|d| d.insert_temp(saved_at_id, now));
     }
 
-    settings.cache_count != prev_cache_count
-        || settings.lru_budget_mb != prev_lru_budget
-        || settings.decode_threads != prev_decode_threads
-        || settings.mouse_wheel_zoom != prev_mouse_wheel_zoom
+    SettingsChanges {
+        pane_settings: settings.cache_count != snapshot.cache_count
+            || settings.lru_budget_mb != snapshot.lru_budget_mb
+            || settings.decode_threads != snapshot.decode_threads
+            || settings.mouse_wheel_zoom != snapshot.mouse_wheel_zoom,
+        sort_order: settings.image_sort_key != snapshot.image_sort_key
+            || settings.image_sort_direction != snapshot.image_sort_direction,
+    }
 }
