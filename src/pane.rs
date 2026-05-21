@@ -346,6 +346,7 @@ impl Pane {
         let old_pan = self.pan;
 
         let response = ui.allocate_rect(available, egui::Sense::click_and_drag());
+        let scale = (available.width() / tex_size.x).min(available.height() / tex_size.y);
 
         // Zoom: scroll wheel (when enabled) or Ctrl/Cmd+scroll, plus pinch-to-zoom
         if response.hovered() && (self.mouse_wheel_zoom || ui.input(|i| i.modifiers.command)) {
@@ -357,14 +358,27 @@ impl Pane {
             self.pan += response.drag_delta();
         }
 
-        // Double-click: reset zoom and pan
+        // Double-click: toggle between fit-to-screen and 1:1.
         if response.double_clicked() {
-            self.zoom = 1.0;
-            self.pan = egui::Vec2::ZERO;
+            let is_fit_to_screen = (self.zoom - 1.0).abs() < f32::EPSILON;
+            let actual_size_zoom = (1.0 / scale).clamp(MIN_ZOOM, MAX_ZOOM);
+
+            if is_fit_to_screen {
+                self.zoom = actual_size_zoom;
+                if self.zoom >= 1.0 {
+                    if let Some(hover_pos) = response.hover_pos() {
+                        self.pan = (hover_pos - available.center()) * (1.0 - self.zoom);
+                    }
+                } else {
+                    self.pan = egui::Vec2::ZERO;
+                }
+            } else {
+                self.zoom = 1.0;
+                self.pan = egui::Vec2::ZERO;
+            }
         }
 
         // Compute display rect with updated zoom/pan (zero-frame-delay)
-        let scale = (available.width() / tex_size.x).min(available.height() / tex_size.y);
         let base_size = tex_size * scale;
         let display_size = base_size * self.zoom;
         let center = available.center() + self.pan;
