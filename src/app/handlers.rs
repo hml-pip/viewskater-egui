@@ -20,8 +20,7 @@ impl App {
                     pane.open_path(
                         dir,
                         ctx,
-                        self.settings.image_sort_key,
-                        self.settings.image_sort_direction,
+                        self.current_sort,
                     );
                     pane.jump_to(self.panes[0].current_index, ctx);
                 }
@@ -36,8 +35,7 @@ impl App {
                 pane.open_path(
                     &dir,
                     ctx,
-                    self.settings.image_sort_key,
-                    self.settings.image_sort_direction,
+                    self.current_sort,
                 );
             }
         }
@@ -52,8 +50,7 @@ impl App {
                 pane.open_path(
                     &file,
                     ctx,
-                    self.settings.image_sort_key,
-                    self.settings.image_sort_direction,
+                    self.current_sort,
                 );
             }
         }
@@ -178,8 +175,7 @@ impl App {
             pane.open_path(
                 &path,
                 ctx,
-                self.settings.image_sort_key,
-                self.settings.image_sort_direction,
+                self.current_sort,
             );
             pane.zoom = zoom;
             pane.pan = pan;
@@ -365,8 +361,7 @@ impl App {
             self.panes[0].open_path(
                 &path,
                 ctx,
-                self.settings.image_sort_key,
-                self.settings.image_sort_direction,
+                self.current_sort,
             );
             if self.panes[0].current_texture.is_some() {
                 self.perf.record_image_load();
@@ -399,15 +394,13 @@ impl App {
                     self.panes[target].open_path(
                         path,
                         ctx,
-                        self.settings.image_sort_key,
-                        self.settings.image_sort_direction,
+                        self.current_sort,
                     );
                 } else {
                     self.panes[0].open_path(
                         path,
                         ctx,
-                        self.settings.image_sort_key,
-                        self.settings.image_sort_direction,
+                        self.current_sort,
                     );
                 }
             }

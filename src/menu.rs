@@ -2,7 +2,7 @@ use eframe::egui;
 
 use crate::app::DualPaneMode;
 use crate::pane::Pane;
-use crate::settings::AppSettings;
+use crate::settings::{AppSettings, ImageSortKey, ImageSortOrder, SortDirection};
 use crate::theme::UiTheme;
 
 /// Toggle switch widget (iOS/Steam style).
@@ -96,6 +96,7 @@ pub(crate) fn show_menu_bar(
     panes: &[Pane],
     dual_pane_mode: DualPaneMode,
     settings: &mut AppSettings,
+    current_sort: &mut ImageSortOrder,
     theme: &UiTheme,
     fps_text: Option<&str>,
     is_fullscreen: bool,
@@ -223,6 +224,27 @@ pub(crate) fn show_menu_bar(
                         }
                         ui.close_menu();
                     }
+                });
+                ui.separator();
+                hover_row(ui, theme, ml, mw, |ui| {
+                    ui.menu_button("Sort By", |ui| {
+                        let (sl, sw) = setup_menu_hover(ui);
+                        for sort_key in ImageSortKey::ALL {
+                            hover_row(ui, theme, sl, sw, |ui| {
+                                ui.radio_value(&mut current_sort.key, sort_key, sort_key.label());
+                            });
+                        }
+                        ui.separator();
+                        for direction in SortDirection::ALL {
+                            hover_row(ui, theme, sl, sw, |ui| {
+                                ui.radio_value(
+                                    &mut current_sort.direction,
+                                    direction,
+                                    direction.label(),
+                                );
+                            });
+                        }
+                    });
                 });
                 ui.separator();
                 hover_row(ui, theme, ml, mw, |ui| {
