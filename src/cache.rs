@@ -212,7 +212,7 @@ impl SlidingWindowCache {
             }
             while self.in_gen.len() < self.max_decode_threads.div_ceil(2) {
                 if let Some((idx, path)) = self.pending_generates.pop_front() {
-                    self.spawn_thread(idx, &path);
+                    self.spawn_thumbnail_thread(idx, &path);
                 } else {
                     break;
                 }
@@ -557,6 +557,7 @@ impl SlidingWindowCache {
         self.in_gen.insert(file_index);
         let pb = path.to_path_buf();
         let tx = self.ttx.clone();
+        let ctx = self.ctx.clone();
 
         std::thread::spawn(move || {
             let image = match image::open(&pb) {
@@ -570,6 +571,7 @@ impl SlidingWindowCache {
                 },
             };
             let _ = tx.send((file_index, image));
+            ctx.request_repaint();
         });
     }
 }
