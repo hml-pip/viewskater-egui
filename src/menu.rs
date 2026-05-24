@@ -229,6 +229,7 @@ pub(crate) fn show_menu_bar(
                 hover_row(ui, theme, ml, mw, |ui| {
                     ui.menu_button("Sort By", |ui| {
                         let (sl, sw) = setup_menu_hover(ui);
+                        ui.style_mut().visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
                         for sort_key in ImageSortKey::ALL {
                             hover_row(ui, theme, sl, sw, |ui| {
                                 ui.radio_value(&mut current_sort.key, sort_key, sort_key.label());

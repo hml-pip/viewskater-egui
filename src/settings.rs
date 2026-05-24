@@ -374,6 +374,12 @@ pub fn show_settings_modal(
                             .color(theme.heading),
                     );
                     ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new("Default sorting for newly opened folders")
+                            .size(11.0)
+                            .color(theme.muted),
+                    );
+                    ui.add_space(4.0);
                     egui::Frame::default()
                         .fill(theme.section_bg)
                         .corner_radius(6.0)
