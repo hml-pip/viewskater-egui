@@ -89,18 +89,25 @@ fn hover_row(
     }
 }
 
+pub(crate) struct MenuBarState<'a> {
+    pub settings: &'a mut AppSettings,
+    pub current_sort: &'a mut ImageSortOrder,
+    pub is_fullscreen: bool,
+}
+
 /// Returns (MenuAction, menu_is_open) so fullscreen mode can keep the bar visible
 /// while the user interacts with a dropdown.
 pub(crate) fn show_menu_bar(
     ctx: &egui::Context,
     panes: &[Pane],
     dual_pane_mode: DualPaneMode,
-    settings: &mut AppSettings,
-    current_sort: &mut ImageSortOrder,
+    state: &mut MenuBarState<'_>,
     theme: &UiTheme,
     fps_text: Option<&str>,
-    is_fullscreen: bool,
 ) -> (MenuAction, bool) {
+    let settings = &mut *state.settings;
+    let current_sort = &mut *state.current_sort;
+    let is_fullscreen = state.is_fullscreen;
     let mut action = MenuAction::None;
     let mut menu_is_open = false;
     let is_dual = panes.len() >= 2;

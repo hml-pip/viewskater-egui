@@ -517,15 +517,18 @@ impl eframe::App for App {
             };
             let settings_snapshot = self.settings.clone();
             let sort_snapshot = self.current_sort;
+            let mut menu_state = menu::MenuBarState {
+                settings: &mut self.settings,
+                current_sort: &mut self.current_sort,
+                is_fullscreen: self.is_fullscreen,
+            };
             let (action, menu_is_open) = menu::show_menu_bar(
                 ctx,
                 &self.panes,
                 self.dual_pane_mode,
-                &mut self.settings,
-                &mut self.current_sort,
+                &mut menu_state,
                 &self.theme,
                 fps_text.as_deref(),
-                self.is_fullscreen,
             );
             self.menu_open = menu_is_open;
             if self.settings != settings_snapshot {
