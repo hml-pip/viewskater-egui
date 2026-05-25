@@ -245,7 +245,6 @@ impl Default for AppSettings {
 #[derive(Default)]
 pub struct SettingsChanges {
     pub pane_settings: bool,
-    pub sort_order: bool,
 }
 
 impl SettingsChanges {
@@ -255,7 +254,6 @@ impl SettingsChanges {
                 || after.lru_budget_mb != before.lru_budget_mb
                 || after.decode_threads != before.decode_threads
                 || after.mouse_wheel_zoom != before.mouse_wheel_zoom,
-            sort_order: after.image_sort_order != before.image_sort_order,
         }
     }
 }

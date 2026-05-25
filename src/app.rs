@@ -590,10 +590,6 @@ impl eframe::App for App {
         // Settings modal — auto-saves on any change inside the modal.
         let settings_changes =
             settings::show_settings_modal(ctx, &mut self.settings, &mut self.show_settings, &self.theme);
-        if settings_changes.sort_order {
-            self.current_sort = self.settings.image_sort_order;
-            self.reload_sorted_panes(ctx);
-        }
         if settings_changes.pane_settings {
             self.apply_settings_to_caches();
         }

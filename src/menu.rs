@@ -245,6 +245,14 @@ pub(crate) fn show_menu_bar(
                                 );
                             });
                         }
+                        if *current_sort != settings.image_sort_order {
+                            ui.separator();
+                            hover_row(ui, theme, sl, sw, |ui| {
+                                if ui.button("Reset to Default").clicked() {
+                                    *current_sort = settings.image_sort_order;
+                                }
+                            });
+                        }
                     });
                 });
                 ui.separator();
