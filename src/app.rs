@@ -22,9 +22,6 @@ const DEFAULT_WINDOW_HEIGHT: f32 = 720.0;
 const FULLSCREEN_TOP_ZONE: f32 = 50.0;
 const FULLSCREEN_BOTTOM_ZONE: f32 = 100.0;
 
-/// Thumbnail image size
-pub const THUMBNAIL_WIDTH: f32 = 400.0;
-pub const THUMBNAIL_HEIGHT: f32 = 300.0;
 /// Preview UI screen size ratio
 const SCREEN_PREVIEW_UI_RATIO: f32 = 5.0;
 
@@ -137,7 +134,7 @@ pub(crate) fn paint_nav_slider(
             // Do not show the preview while the mouse is being dragged
             if cursor_index < pane.image_paths.len() && !response.dragged() {
                 if let Some(swc) = pane.cache.as_mut() {
-                    let opt= swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index]);
+                    let opt= swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index], ui.ctx());
 
                     let tex_size = match opt {
                         Some(ref tex) => tex.size_vec2(),

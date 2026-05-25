@@ -9,11 +9,13 @@ const COL_LOADED: egui::Color32 = egui::Color32::from_rgb(76, 175, 80);
 const COL_LOADING: egui::Color32 = egui::Color32::from_rgb(255, 183, 77);
 const COL_EMPTY: egui::Color32 = egui::Color32::from_rgb(60, 60, 60);
 
+/// Use background thread to generate thumbnail if file size exceed 20MB
+const BACKGROUND_FILE_SIZE: u64 = 20_971_520;
+
 pub struct DecodeResult {
     pub file_index: usize,
     pub image: Option<egui::ColorImage>,
     pub decode_ms: f64,
-    pub thumbnail: Option<egui::ColorImage>,
 }
 
 /// Sliding window cache that preloads neighboring images in background threads.
@@ -33,7 +35,7 @@ pub struct SlidingWindowCache {
 
     /// Completed decodes waiting for GPU upload. `poll()` drains `rx` into
     /// this queue and uploads up to `UPLOADS_PER_FRAME` per frame.
-    pending_uploads: VecDeque<(usize, egui::ColorImage, String, egui::ColorImage)>,
+    pending_uploads: VecDeque<(usize, egui::ColorImage, String)>,
 
     /// Decode requests waiting for a thread slot. `spawn_load` pushes here
     /// when the concurrent limit is reached; `poll` spawns the next one
@@ -117,9 +119,8 @@ impl SlidingWindowCache {
 
         // Synchronously decode the center image
         let center_slot = center_index - self.first_file_index;
-        if let (Some(tex), Some(thumb)) = Self::decode_sync(&image_paths[center_index], &self.ctx) {
+        if let Some(tex) = Self::decode_sync(&image_paths[center_index], &self.ctx) {
             self.slots[center_slot] = Some(tex);
-            self.thumbnails.insert(center_index, Some(thumb));
         }
 
         // Spawn background loads for all other valid slots
@@ -155,7 +156,7 @@ impl SlidingWindowCache {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 self.pending_uploads
-                    .push_back((result.file_index, color_image, name, result.thumbnail.unwrap_or_default()));
+                    .push_back((result.file_index, color_image, name));
             }
 
             // A decode slot freed up — spawn the next queued decode if any.
@@ -173,7 +174,7 @@ impl SlidingWindowCache {
 
         // Phase 2: upload at most UPLOADS_PER_FRAME.
         for _ in 0..UPLOADS_PER_FRAME {
-            let Some((file_index, color_image, name, thumbnail)) = self.pending_uploads.pop_front() else {
+            let Some((file_index, color_image, name)) = self.pending_uploads.pop_front() else {
                 break;
             };
             if let Some(slot_idx) = self.slot_index_for(file_index) {
@@ -184,15 +185,6 @@ impl SlidingWindowCache {
                         egui::TextureOptions::LINEAR,
                     );
                     self.slots[slot_idx] = Some(texture);
-
-                    if !self.thumbnails.contains_key(&file_index) {
-                        let texture = self.ctx.load_texture(
-                            format!("{}t", name),
-                            thumbnail,
-                            egui::TextureOptions::LINEAR,
-                        );
-                        self.thumbnails.insert(file_index, Some(texture));
-                    }
                 }
             }
         }
@@ -330,13 +322,17 @@ impl SlidingWindowCache {
     }
 
     /// Get the thumbnail [`egui::TextureHandle`] for a given picture index,
-    /// generate it in the background if not cached.
-    pub fn current_thumbnail_for(&mut self, thumb_index: usize, path: &Path) -> Option<egui::TextureHandle> {
+    /// generate it if not cached.
+    pub fn current_thumbnail_for(&mut self, thumb_index: usize, path: &Path, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         match self.thumbnails.get(&thumb_index) {
             Some(opt) => opt.clone(),
             None => {
-                self.spawn_thumbnail(thumb_index, path);
-                None
+                if std::fs::metadata(path).is_ok_and(|m|m.len() > BACKGROUND_FILE_SIZE) {
+                    self.spawn_thumbnail(thumb_index, path);
+                    None
+                } else {
+                    Self::generate_thumbnail_sync(path, ctx)
+                }
             },
         }
     }
@@ -381,16 +377,13 @@ impl SlidingWindowCache {
 
         std::thread::spawn(move || {
             let start = Instant::now();
-            let (image, thumbnail) = match image::open(&path) {
+            let image = match image::open(&path) {
                 Ok(img) => {
-                    (
-                        Some(crate::decode::image_to_color_image(img.clone())),
-                        Some(crate::decode::image_to_thumbnail(img))
-                    )
+                    Some(crate::decode::image_to_color_image(img))
                 }
                 Err(e) => {
                     log::warn!("Background decode failed for {}: {}", path.display(), e);
-                    (None, None)
+                    None
                 }
             };
             let decode_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -398,7 +391,6 @@ impl SlidingWindowCache {
                 file_index,
                 image,
                 decode_ms,
-                thumbnail,
             });
             ctx.request_repaint();
         });
@@ -517,24 +509,38 @@ impl SlidingWindowCache {
     }
 
     /// Synchronously decode an image and upload as a texture.
-    fn decode_sync(path: &Path, ctx: &egui::Context) ->
-        (Option<egui::TextureHandle>, Option<egui::TextureHandle>) {
+    fn decode_sync(path: &Path, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         match image::open(path) {
             Ok(img) => {
                 let color_image = crate::decode::image_to_color_image(img.clone());
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                Some(ctx.load_texture(&name, color_image, egui::TextureOptions::LINEAR))
+            }
+            Err(e) => {
+                log::error!("Failed to decode {}: {}", path.display(), e);
+                None
+            }
+        }
+    }
+
+    /// Synchronously generate a thumbnail and upload as a texture
+    fn generate_thumbnail_sync(path: &Path, ctx: &egui::Context) -> Option<egui::TextureHandle> {
+        match image::open(path) {
+            Ok(img) => {
                 let thumbnail = crate::decode::image_to_thumbnail(img);
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                (
-                    Some(ctx.load_texture(&name, color_image, egui::TextureOptions::LINEAR)),
-                    Some(ctx.load_texture(format!("{}t", name), thumbnail, egui::TextureOptions::LINEAR))
-                )
+                    let tex = Some(ctx.load_texture(format!("{}t", name), thumbnail, egui::TextureOptions::LINEAR));
+                    tex
             }
             Err(e) => {
-                log::error!("Failed to decode {}: {}", path.display(), e);
-                (None, None)
+                log::error!("Failed to generate thumbnail for {}: {e}", path.display());
+                None
             }
         }
     }
@@ -565,7 +571,7 @@ impl SlidingWindowCache {
                     Some(crate::decode::image_to_thumbnail(img))
                 },
                 Err(e) => {
-                    log::error!("Background decode failed for {}: {e}", pb.display());
+                    log::error!("Background generate thumbnail failed for {}: {e}", pb.display());
                     // Display a black image to avoid spawning background threads for unsupported images
                     Some(egui::ColorImage::new([1,1], egui::Color32::BLACK))
                 },
