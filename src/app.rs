@@ -54,6 +54,8 @@ pub(crate) enum DualPaneMode {
 pub(crate) struct SliderResult {
     pub target: Option<usize>,
     pub released: bool,
+    pub preview_active: bool,
+    pub preview_cursor_index: Option<usize>,
 }
 
 /// Render a custom navigation slider (accent handle + two-tone rail).
@@ -69,8 +71,12 @@ pub(crate) fn paint_nav_slider(
         return SliderResult {
             target: None,
             released: false,
+            preview_active: false,
+            preview_cursor_index: None,
         };
     }
+    let mut preview_active = false;
+    let mut preview_cursor_index = None;
 
     let max = max_images - 1;
     let mut idx = current_idx;
@@ -137,6 +143,8 @@ pub(crate) fn paint_nav_slider(
             });
             if cursor_index < pane.image_paths.len() && !response.dragged() && !nav_active {
                 if let Some(swc) = pane.cache.as_mut() {
+                    preview_active = true;
+                    preview_cursor_index = Some(cursor_index);
                     let opt = swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index]);
 
                     let tex_size = match opt {
@@ -219,7 +227,7 @@ pub(crate) fn paint_nav_slider(
         }
     }
 
-    SliderResult { target, released }
+    SliderResult { target, released, preview_active, preview_cursor_index }
 }
 
 pub struct App {
@@ -236,6 +244,7 @@ pub struct App {
     pub(crate) log_buffer: Arc<Mutex<VecDeque<String>>>,
     initial_size_set: bool,
     file_receiver: Receiver<PathBuf>,
+    last_preview_idx: Option<usize>,
 }
 
 impl App {
@@ -262,6 +271,7 @@ impl App {
             log_buffer,
             initial_size_set: false,
             file_receiver,
+            last_preview_idx: None,
         };
 
         if !paths.is_empty() {
@@ -357,6 +367,15 @@ impl App {
         let result = egui::TopBottomPanel::bottom("nav")
             .show(ctx, |ui| paint_nav_slider(ui, current_idx, max_images, accent, &mut self.panes))
             .inner;
+        if result.preview_active {
+            if result.preview_cursor_index != self.last_preview_idx {
+                self.perf.record_frame();
+                self.last_preview_idx = result.preview_cursor_index;
+            }
+        } else {
+            self.perf.clear_frames();
+            self.last_preview_idx = None;
+        }
 
         self.apply_slider_result_all(result, ctx);
     }
