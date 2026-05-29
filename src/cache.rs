@@ -512,7 +512,7 @@ impl SlidingWindowCache {
     fn decode_sync(path: &Path, ctx: &egui::Context) -> Option<egui::TextureHandle> {
         match image::open(path) {
             Ok(img) => {
-                let color_image = crate::decode::image_to_color_image(img.clone());
+                let color_image = crate::decode::image_to_color_image(img);
                 let name = path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())

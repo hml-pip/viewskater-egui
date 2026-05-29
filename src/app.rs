@@ -131,8 +131,11 @@ pub(crate) fn paint_nav_slider(
         let cursor_t = ((pos.x - usable.min) / (usable.max - usable.min)).clamp(0.0, 1.0);
         let cursor_index = (max as f32 * cursor_t).round() as usize;
         if let Some(pane) = panes.get_mut(0) {
-            // Do not show the preview while the mouse is being dragged
-            if cursor_index < pane.image_paths.len() && !response.dragged() {
+            let nav_active = ui.ctx().input(|i| {
+                i.key_down(egui::Key::ArrowLeft) || i.key_down(egui::Key::ArrowRight)
+                || i.key_down(egui::Key::A) || i.key_down(egui::Key::D)
+            });
+            if cursor_index < pane.image_paths.len() && !response.dragged() && !nav_active {
                 if let Some(swc) = pane.cache.as_mut() {
                     let opt= swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index], ui.ctx());
 
