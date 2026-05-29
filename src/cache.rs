@@ -46,12 +46,16 @@ pub struct SlidingWindowCache {
 
     ctx: egui::Context,
 
-    /// Thumbnail cache for slider
-    thumbnails: HashMap<usize, Option<egui::TextureHandle>>,
+    /// Single reusable GPU texture for the slider preview.
+    thumb_texture: Option<egui::TextureHandle>,
+    /// File index of the thumbnail currently in thumb_texture.
+    thumb_texture_idx: Option<usize>,
+    /// Cache of decoded thumbnail images so revisits don't re-decode.
+    thumb_cache: HashMap<usize, egui::ColorImage>,
     ttx: mpsc::Sender<(usize, Option<egui::ColorImage>)>,
     trx: mpsc::Receiver<(usize, Option<egui::ColorImage>)>,
     in_gen: HashSet<usize>,
-    /// Thumbnail generate requests wating for a thread slot.
+    /// Thumbnail generate requests waiting for a thread slot.
     pending_generates: VecDeque<(usize, PathBuf)>,
 }
 
@@ -77,7 +81,9 @@ impl SlidingWindowCache {
             pending_decodes: VecDeque::new(),
             max_decode_threads: decode_threads,
             ctx: ctx.clone(),
-            thumbnails: HashMap::new(),
+            thumb_texture: None,
+            thumb_texture_idx: None,
+            thumb_cache: HashMap::new(),
             ttx,
             trx,
             in_gen: HashSet::new(),
@@ -115,7 +121,9 @@ impl SlidingWindowCache {
         // Clear all slots
         self.slots.clear();
         self.slots.resize(cache_size, None);
-        self.thumbnails.clear();
+        self.thumb_texture = None;
+        self.thumb_texture_idx = None;
+        self.thumb_cache.clear();
 
         // Synchronously decode the center image
         let center_slot = center_index - self.first_file_index;
@@ -189,18 +197,11 @@ impl SlidingWindowCache {
             }
         }
 
-        // Drain generated thumbnail results into hashmap
         while let Ok(result) = self.trx.try_recv() {
             self.in_gen.remove(&result.0);
-            if !self.thumbnails.contains_key(&result.0) {
-                if let Some(img) = result.1 {
-                    let texture = self.ctx.load_texture(
-                        format!("thumb{}", result.0),
-                        img,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    self.thumbnails.insert(result.0, Some(texture));
-                };
+            if let Some(img) = result.1 {
+                self.thumb_cache.insert(result.0, img.clone());
+                self.upload_thumbnail(result.0, img);
             }
             while self.in_gen.len() < self.max_decode_threads.div_ceil(2) {
                 if let Some((idx, path)) = self.pending_generates.pop_front() {
@@ -209,7 +210,7 @@ impl SlidingWindowCache {
                     break;
                 }
             }
-        };
+        }
 
         if !self.pending_uploads.is_empty() || !self.pending_decodes.is_empty() {
             self.ctx.request_repaint();
@@ -321,20 +322,38 @@ impl SlidingWindowCache {
         self.slots.get(slot_idx).and_then(|opt| opt.clone())
     }
 
-    /// Get the thumbnail [`egui::TextureHandle`] for a given picture index,
-    /// generate it if not cached.
-    pub fn current_thumbnail_for(&mut self, thumb_index: usize, path: &Path, ctx: &egui::Context) -> Option<egui::TextureHandle> {
-        match self.thumbnails.get(&thumb_index) {
-            Some(opt) => opt.clone(),
-            None => {
-                if std::fs::metadata(path).is_ok_and(|m|m.len() > BACKGROUND_FILE_SIZE) {
-                    self.spawn_thumbnail(thumb_index, path);
-                    None
-                } else {
-                    Self::generate_thumbnail_sync(path, ctx)
-                }
-            },
+    pub fn current_thumbnail_for(&mut self, thumb_index: usize, path: &Path) -> Option<egui::TextureHandle> {
+        if self.thumb_texture_idx == Some(thumb_index) {
+            return self.thumb_texture.clone();
         }
+        if let Some(img) = self.thumb_cache.get(&thumb_index) {
+            self.upload_thumbnail(thumb_index, img.clone());
+            return self.thumb_texture.clone();
+        }
+        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if file_size <= BACKGROUND_FILE_SIZE {
+            if let Ok(img) = image::open(path) {
+                let thumbnail = crate::decode::image_to_thumbnail(img);
+                self.thumb_cache.insert(thumb_index, thumbnail.clone());
+                self.upload_thumbnail(thumb_index, thumbnail);
+                return self.thumb_texture.clone();
+            }
+        } else {
+            self.spawn_thumbnail(thumb_index, path);
+        }
+        self.thumb_texture.clone()
+    }
+
+    fn upload_thumbnail(&mut self, idx: usize, img: egui::ColorImage) {
+        match &mut self.thumb_texture {
+            Some(tex) => tex.set(img, egui::TextureOptions::LINEAR),
+            None => {
+                self.thumb_texture = Some(self.ctx.load_texture(
+                    "thumb_preview", img, egui::TextureOptions::LINEAR,
+                ));
+            }
+        }
+        self.thumb_texture_idx = Some(idx);
     }
     /// Find which slot (if any) holds the given file index.
     fn slot_index_for(&self, file_index: usize) -> Option<usize> {
@@ -526,29 +545,9 @@ impl SlidingWindowCache {
         }
     }
 
-    /// Synchronously generate a thumbnail and upload as a texture
-    fn generate_thumbnail_sync(path: &Path, ctx: &egui::Context) -> Option<egui::TextureHandle> {
-        match image::open(path) {
-            Ok(img) => {
-                let thumbnail = crate::decode::image_to_thumbnail(img);
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                    let tex = Some(ctx.load_texture(format!("{}t", name), thumbnail, egui::TextureOptions::LINEAR));
-                    tex
-            }
-            Err(e) => {
-                log::error!("Failed to generate thumbnail for {}: {e}", path.display());
-                None
-            }
-        }
-    }
-
     fn spawn_thumbnail(&mut self, file_index: usize, path: &Path) {
         if self.in_gen.contains(&file_index) |
-            self.pending_generates.iter().any(|(idx, _)| *idx == file_index) |
-            self.thumbnails.contains_key(&file_index) {
+            self.pending_generates.iter().any(|(idx, _)| *idx == file_index) {
             return;
         }
 

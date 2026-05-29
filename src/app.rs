@@ -137,7 +137,7 @@ pub(crate) fn paint_nav_slider(
             });
             if cursor_index < pane.image_paths.len() && !response.dragged() && !nav_active {
                 if let Some(swc) = pane.cache.as_mut() {
-                    let opt= swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index], ui.ctx());
+                    let opt = swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index]);
 
                     let tex_size = match opt {
                         Some(ref tex) => tex.size_vec2(),
@@ -205,29 +205,9 @@ pub(crate) fn paint_nav_slider(
                         egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0),
                     );
 
-                    match opt {
-                        Some(tex) => {
-                            painter.image(tex.id(), img_rect, uv, egui::Color32::WHITE);
-                        },
-                        None => {
-                            // Show spinner according to egui::Spinner `paint_at`
-                            let color = ui.visuals().strong_text_color();
-                            let radius = (frame_rect.height() / 4.0) - 2.0;
-                            let n_points = 20;
-                            let time = ui.input(|i| i.time);
-                            let start_angle = time * std::f64::consts::TAU;
-                            let end_angle = start_angle + 240f64.to_radians() * time.sin();
-                            let points: Vec<egui::Pos2> = (0..n_points)
-                                .map(|i| {
-                                    let angle = egui::epaint::emath::lerp(start_angle..=end_angle, i as f64 / n_points as f64);
-                                    let (sin, cos) = angle.sin_cos();
-                                    frame_rect.center() + radius * egui::vec2(cos as f32, sin as f32)
-                                })
-                                .collect();
-                            painter
-                                .add(egui::epaint::Shape::line(points, egui::epaint::Stroke::new(3.0, color)));
-                        },
-                    };
+                    if let Some(tex) = opt {
+                        painter.image(tex.id(), img_rect, uv, egui::Color32::WHITE);
+                    }
 
                     // Index label
                     let label_pos = egui::pos2(
