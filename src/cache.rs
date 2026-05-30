@@ -336,6 +336,14 @@ impl SlidingWindowCache {
             self.upload_thumbnail(thumb_index, img.clone());
             return self.thumb_texture.clone();
         }
+        if let Some(&nearest_idx) = self.thumb_cache.keys()
+            .min_by_key(|&&k| (k as isize - thumb_index as isize).unsigned_abs())
+        {
+            if self.thumb_texture_idx != Some(nearest_idx) {
+                let img = self.thumb_cache[&nearest_idx].clone();
+                self.upload_thumbnail(nearest_idx, img);
+            }
+        }
         let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         if file_size <= BACKGROUND_FILE_SIZE {
             if let Ok(img) = image::open(path) {
