@@ -9,8 +9,6 @@ const COL_LOADED: egui::Color32 = egui::Color32::from_rgb(76, 175, 80);
 const COL_LOADING: egui::Color32 = egui::Color32::from_rgb(255, 183, 77);
 const COL_EMPTY: egui::Color32 = egui::Color32::from_rgb(60, 60, 60);
 
-/// Use background thread to generate thumbnail if file size exceed 20MB
-const BACKGROUND_FILE_SIZE: u64 = 1_048_576;
 
 pub struct DecodeResult {
     pub file_index: usize,
@@ -344,17 +342,7 @@ impl SlidingWindowCache {
                 self.upload_thumbnail(nearest_idx, img);
             }
         }
-        let file_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        if file_size <= BACKGROUND_FILE_SIZE {
-            if let Ok(img) = image::open(path) {
-                let thumbnail = crate::decode::image_to_thumbnail(img);
-                self.thumb_cache.insert(thumb_index, thumbnail.clone());
-                self.upload_thumbnail(thumb_index, thumbnail);
-                return self.thumb_texture.clone();
-            }
-        } else {
-            let _ = self.thumb_req_tx.send((thumb_index, path.to_path_buf()));
-        }
+        let _ = self.thumb_req_tx.send((thumb_index, path.to_path_buf()));
         self.thumb_texture.clone()
     }
 
