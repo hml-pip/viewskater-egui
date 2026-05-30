@@ -85,7 +85,7 @@ fn sort_paths(
     let mut paths: Vec<PathBuf> = entries.into_iter().map(|entry| entry.path()).collect();
     paths.sort_by(|a, b| {
         apply_sort_direction(compare(a, b), sort_direction)
-            .then_with(|| compare_names(a, b))
+            .then_with(|| apply_sort_direction(compare_names(a, b), sort_direction))
     });
     paths
 }
@@ -98,7 +98,7 @@ fn sort_files(
     let mut images: Vec<ImageFile> = entries.into_iter().map(ImageFile::new).collect();
     images.sort_by(|a, b| {
         apply_sort_direction(compare(a, b), sort_direction)
-            .then_with(|| compare_names(&a.path, &b.path))
+            .then_with(|| apply_sort_direction(compare_names(&a.path, &b.path), sort_direction))
     });
     images.into_iter().map(|image| image.path).collect()
 }
