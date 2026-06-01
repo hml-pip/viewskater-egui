@@ -116,6 +116,7 @@ pub struct App {
     pub(crate) menu_open: bool,
     pub(crate) log_buffer: Arc<Mutex<VecDeque<String>>>,
     initial_size_set: bool,
+    title: Option<String>,
     file_receiver: Receiver<PathBuf>,
 }
 
@@ -143,6 +144,7 @@ impl App {
             menu_open: false,
             log_buffer,
             initial_size_set: false,
+            title: None,
             file_receiver,
         };
 
@@ -172,7 +174,7 @@ impl App {
         app
     }
 
-    fn update_title(&self, ctx: &egui::Context) {
+    fn current_title(&self) -> String {
         let name = |pane: &Pane| -> Option<String> {
             pane.image_paths.get(pane.current_index).map(|path| {
                 path.file_name()
@@ -182,7 +184,7 @@ impl App {
             })
         };
 
-        let title = if self.panes.len() >= 2 {
+        if self.panes.len() >= 2 {
             let left = name(&self.panes[0]).unwrap_or_default();
             let right = name(&self.panes[1]).unwrap_or_default();
             if left.is_empty() && right.is_empty() {
@@ -193,8 +195,15 @@ impl App {
         } else {
             self.panes.first().and_then(name)
                 .unwrap_or_else(|| "ViewSkater".to_string())
-        };
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
+    }
+
+    fn update_title(&mut self, ctx: &egui::Context) {
+        let title = self.current_title();
+        if self.title.as_deref() != Some(title.as_str()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.title = Some(title);
+        }
     }
 
     fn show_slider_panel(&mut self, ctx: &egui::Context) {
