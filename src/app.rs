@@ -57,7 +57,6 @@ pub(crate) struct SliderResult {
     pub preview_active: bool,
     pub preview_cursor_index: Option<usize>,
 }
-
 /// Render a custom navigation slider (accent handle + two-tone rail).
 /// Returns the drag target index and whether the drag was released.
 pub(crate) fn paint_nav_slider(
@@ -147,7 +146,7 @@ pub(crate) fn paint_nav_slider(
                     preview_cursor_index = Some(cursor_index);
                     let opt = swc.current_thumbnail_for(cursor_index, &pane.image_paths[cursor_index]);
 
-                    let tex_size = match opt {
+                    let tex_size = match opt.0 {
                         Some(ref tex) => tex.size_vec2(),
                         None => egui::Vec2::new(1.0, 1.0),
                     };
@@ -166,8 +165,9 @@ pub(crate) fn paint_nav_slider(
                     let ratio = (ui_width / tex_size.x).min(ui_height / tex_size.y);
                     let scaled = tex_size * ratio;
 
+                    let loading = if opt.1 {""} else {" ?"};
                     // Pre-layout label to compute total frame size
-                    let label_text = format!("{} / {max_images}", cursor_index + 1);
+                    let label_text = format!("{}{loading} / {max_images}", cursor_index + 1);
                     let label_font = egui::FontId::proportional(14.0);
                     let label_galley = ui.ctx().fonts(|f| {
                         f.layout_no_wrap(label_text, label_font, style.visuals.text_color())
@@ -213,7 +213,7 @@ pub(crate) fn paint_nav_slider(
                         egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0),
                     );
 
-                    if let Some(tex) = opt {
+                    if let Some(tex) = opt.0 {
                         painter.image(tex.id(), img_rect, uv, egui::Color32::WHITE);
                     }
 

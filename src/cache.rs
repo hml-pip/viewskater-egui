@@ -326,13 +326,15 @@ impl SlidingWindowCache {
         self.slots.get(slot_idx).and_then(|opt| opt.clone())
     }
 
-    pub fn current_thumbnail_for(&mut self, thumb_index: usize, path: &Path) -> Option<egui::TextureHandle> {
+    /// Get the [`egui::TextureHandle`] for a given thumbnail index,
+    /// return true if cached.
+    pub fn current_thumbnail_for(&mut self, thumb_index: usize, path: &Path) -> (Option<egui::TextureHandle>, bool) {
         if self.thumb_texture_idx == Some(thumb_index) {
-            return self.thumb_texture.clone();
+            return (self.thumb_texture.clone(), true);
         }
         if let Some(img) = self.thumb_cache.get(&thumb_index) {
             self.upload_thumbnail(thumb_index, img.clone());
-            return self.thumb_texture.clone();
+            return (self.thumb_texture.clone(), false);
         }
         if let Some(&nearest_idx) = self.thumb_cache.keys()
             .min_by_key(|&&k| (k as isize - thumb_index as isize).unsigned_abs())
@@ -343,7 +345,7 @@ impl SlidingWindowCache {
             }
         }
         let _ = self.thumb_req_tx.send((thumb_index, path.to_path_buf()));
-        self.thumb_texture.clone()
+        (self.thumb_texture.clone(), false)
     }
 
     fn upload_thumbnail(&mut self, idx: usize, img: egui::ColorImage) {
