@@ -14,6 +14,7 @@ use crate::pane::Pane;
 use crate::perf;
 use crate::settings::{self, AppSettings, ImageSortOrder};
 use crate::theme::UiTheme;
+use crate::window_state::{self, NormalWindowGeometry};
 
 /// Target window size in physical pixels (matches iced version behavior).
 const DEFAULT_WINDOW_WIDTH: f32 = 1280.0;
@@ -308,6 +309,9 @@ pub struct App {
     last_preview_idx: Option<usize>,
     preview_stale_since: Option<(usize, Instant)>,
     preview_bench: Option<crate::bench::preview::PreviewBench>,
+    /// Last geometry seen while the window was in its normal state; what
+    /// gets persisted for the next launch.
+    window_geometry: Option<NormalWindowGeometry>,
 }
 
 impl App {
@@ -348,6 +352,7 @@ impl App {
             last_preview_idx: None,
             preview_stale_since: None,
             preview_bench: None,
+            window_geometry: None,
         };
 
         if !paths.is_empty() {
@@ -774,6 +779,12 @@ impl eframe::App for App {
             self.needs_dpi_resize = false;
         }
 
+        // Track the normal-state geometry so save() persists the size and
+        // position from before any maximize or fullscreen, not at quit.
+        if let Some(geometry) = NormalWindowGeometry::capture(ctx) {
+            self.window_geometry = Some(geometry);
+        }
+
         for pane in &mut self.panes {
             pane.poll_cache();
             pane.poll_animation();
@@ -906,5 +917,17 @@ impl eframe::App for App {
 
         // About modal (on top of everything)
         about::show_about_modal(ctx, &mut self.show_about, &self.theme);
+    }
+
+    /// Called by eframe on exit and at its autosave interval, after it has
+    /// written its own entries and before the storage is flushed.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        if let Some(geometry) = self.window_geometry {
+            eframe::set_value(
+                storage,
+                window_state::EFRAME_WINDOW_KEY,
+                &geometry.to_window_settings(),
+            );
+        }
     }
 }

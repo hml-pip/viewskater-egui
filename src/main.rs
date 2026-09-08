@@ -27,6 +27,7 @@ mod platform;
 mod settings;
 mod theme;
 mod view_animation;
+mod window_state;
 
 #[derive(Parser)]
 #[command(name = "viewskater-egui", about = "Fast image viewer")]
@@ -143,6 +144,9 @@ fn main() -> eframe::Result {
         renderer: eframe::Renderer::Wgpu,
         dithering: false,
         wgpu_options,
+        // The app writes the window entry itself (see window_state.rs) so a
+        // maximized or fullscreen quit does not restore as such.
+        persist_window: false,
         ..Default::default()
     };
 

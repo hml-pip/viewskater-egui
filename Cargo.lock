@@ -1148,7 +1148,7 @@ dependencies = [
 [[package]]
 name = "egui-winit"
 version = "0.31.1"
-source = "git+https://github.com/ggand0/egui-winit-custom.git?branch=main#59c42de376cf2157beb9e90e05d45e54fea2c8c2"
+source = "git+https://github.com/ggand0/egui-winit-custom.git?branch=main#dd7862a7c9cf93944f05100c2ea9af06ec10bf63"
 dependencies = [
  "accesskit_winit",
  "ahash",
@@ -3907,6 +3907,7 @@ dependencies = [
  "dirs",
  "eframe",
  "egui",
+ "egui-winit",
  "image",
  "jxl-oxide",
  "libc",
