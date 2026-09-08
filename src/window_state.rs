@@ -35,8 +35,15 @@ pub struct NormalWindowGeometry {
 
 impl NormalWindowGeometry {
     /// Capture the current geometry, or None while the window is maximized,
-    /// fullscreen, or minimized.
-    pub fn capture(ctx: &egui::Context) -> Option<Self> {
+    /// fullscreen, or minimized. On macOS egui-winit does not query the
+    /// maximized state at runtime, so the window is asked directly; that
+    /// also excludes the frames of a zoom animation in progress.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+    pub fn capture(ctx: &egui::Context, frame: &eframe::Frame) -> Option<Self> {
+        #[cfg(target_os = "macos")]
+        if crate::platform::macos::window_zoomed_or_resizing(frame) {
+            return None;
+        }
         ctx.input(|i| {
             let vp = i.viewport();
             if vp.maximized.unwrap_or(false)

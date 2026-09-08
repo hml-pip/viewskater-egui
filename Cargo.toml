@@ -54,7 +54,10 @@ objc2-foundation = { version = "0.2", features = [
 objc2-app-kit = { version = "0.2", features = [
     "NSApplication",
     "NSResponder",
+    "NSView",
+    "NSWindow",
 ] }
+raw-window-handle = "0.6"
 
 [build-dependencies]
 chrono = "0.4"

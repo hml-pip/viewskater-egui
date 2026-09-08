@@ -781,7 +781,7 @@ impl eframe::App for App {
 
         // Track the normal-state geometry so save() persists the size and
         // position from before any maximize or fullscreen, not at quit.
-        if let Some(geometry) = NormalWindowGeometry::capture(ctx) {
+        if let Some(geometry) = NormalWindowGeometry::capture(ctx, frame) {
             self.window_geometry = Some(geometry);
         }
 
