@@ -1,51 +1,206 @@
+use std::cmp::Ordering;
 use std::collections::VecDeque;
-use std::fs::OpenOptions;
-use std::io::Write;
+use std::fs::{DirEntry, File, OpenOptions};
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
+use std::time::SystemTime;
 
+use image::{AnimationDecoder, DynamicImage, ImageFormat, ImageReader, ImageResult};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
+
+use crate::settings::{ImageDiscoveryOptions, ImageSortKey, SortDirection};
 
 const APP_NAME: &str = "viewskater-egui";
 
 const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "png", "bmp", "webp", "gif", "tiff", "tif", "qoi", "tga",
+    "jpg", "jpeg", "jxl", "png", "apng", "bmp", "webp", "gif", "tiff", "tif", "qoi", "tga",
 ];
+const ANIMATION_CAPABLE_EXTENSIONS: &[&str] = &["gif", "png", "apng", "webp"];
+
+static REGISTER_IMAGE_DECODERS: Once = Once::new();
 
 pub fn is_supported_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| SUPPORTED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+    has_extension(path, SUPPORTED_EXTENSIONS)
 }
 
-pub fn enumerate_images(dir: &Path) -> Vec<PathBuf> {
+pub fn may_have_animation(path: &Path) -> bool {
+    has_extension(path, ANIMATION_CAPABLE_EXTENSIONS)
+}
+
+fn has_extension(path: &Path, extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| extensions.iter().any(|supported| ext.eq_ignore_ascii_case(supported)))
+}
+
+pub fn enumerate_images(dir: &Path, opts: ImageDiscoveryOptions) -> Vec<PathBuf> {
+    let entries = enumerate_images_inner(dir, opts);
+
+    let sort_order = &opts.sort_order;
+    let paths = match sort_order.key {
+        ImageSortKey::Name => sort_paths(entries, sort_order.direction, compare_names),
+        ImageSortKey::Extension => sort_paths(entries, sort_order.direction, compare_extensions),
+        ImageSortKey::Modified => {
+            sort_files(entries, sort_order.direction, |a, b| a.modified.cmp(&b.modified))
+        }
+        ImageSortKey::Created => {
+            sort_files(entries, sort_order.direction, |a, b| a.created.cmp(&b.created))
+        }
+        ImageSortKey::Size => sort_files(entries, sort_order.direction, |a, b| a.size.cmp(&b.size)),
+    };
+
+    log::info!("Found {} images in {}", paths.len(), dir.display());
+    paths
+}
+
+fn enumerate_images_inner(dir: &Path, opts: ImageDiscoveryOptions) -> Vec<DirEntry> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         log::warn!("Failed to read directory: {}", dir.display());
         return Vec::new();
     };
 
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            let not_hidden = p
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| !n.starts_with('.'));
-            not_hidden && is_supported_image(p)
-        })
-        .collect();
+    let mut retval = Vec::<DirEntry>::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(ftype) => {
+                if !opts.include_hidden {
+                    let is_hidden = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with('.'));
 
+                    if is_hidden {
+                        continue;
+                    }
+                };
+
+                if ftype.is_file() && is_supported_image(&path) {
+                    retval.push(entry);
+                } else if ftype.is_dir() && opts.recursive {
+                    retval.append(&mut enumerate_images_inner(&path, opts));
+                }
+            }
+            Err(err) => {
+                log::warn!("Failed to get file type for {}: {}", path.display(), err);
+            }
+        }
+    }
+
+    retval
+}
+
+struct ImageFile {
+    path: PathBuf,
+    modified: Option<SystemTime>,
+    created: Option<SystemTime>,
+    size: Option<u64>,
+}
+
+impl ImageFile {
+    fn new(entry: DirEntry) -> Self {
+        let metadata = entry.metadata().ok();
+        Self {
+            path: entry.path(),
+            modified: metadata.as_ref().and_then(|m| m.modified().ok()),
+            created: metadata.as_ref().and_then(|m| m.created().ok()),
+            size: metadata.as_ref().map(|m| m.len()),
+        }
+    }
+}
+
+fn sort_paths(
+    entries: Vec<DirEntry>,
+    sort_direction: SortDirection,
+    compare: impl Fn(&Path, &Path) -> Ordering,
+) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = entries.into_iter().map(|entry| entry.path()).collect();
     paths.sort_by(|a, b| {
-        natord::compare(
-            &a.file_name().unwrap_or_default().to_string_lossy(),
-            &b.file_name().unwrap_or_default().to_string_lossy(),
-        )
+        apply_sort_direction(compare(a, b), sort_direction)
+            .then_with(|| apply_sort_direction(compare_names(a, b), sort_direction))
     });
-
-    log::info!("Found {} images in {}", paths.len(), dir.display());
     paths
+}
+
+fn sort_files(
+    entries: Vec<DirEntry>,
+    sort_direction: SortDirection,
+    compare: impl Fn(&ImageFile, &ImageFile) -> Ordering,
+) -> Vec<PathBuf> {
+    let mut images: Vec<ImageFile> = entries.into_iter().map(ImageFile::new).collect();
+    images.sort_by(|a, b| {
+        apply_sort_direction(compare(a, b), sort_direction)
+            .then_with(|| apply_sort_direction(compare_names(&a.path, &b.path), sort_direction))
+    });
+    images.into_iter().map(|image| image.path).collect()
+}
+
+fn apply_sort_direction(ordering: Ordering, sort_direction: SortDirection) -> Ordering {
+    match sort_direction {
+        SortDirection::Ascending => ordering,
+        SortDirection::Descending => ordering.reverse(),
+    }
+}
+
+fn compare_names(a: &Path, b: &Path) -> Ordering {
+    natord::compare(
+        &a.as_os_str().to_string_lossy(),
+        &b.as_os_str().to_string_lossy(),
+    )
+}
+
+fn compare_extensions(a: &Path, b: &Path) -> Ordering {
+    natord::compare(
+        &a.extension().unwrap_or_default().to_string_lossy(),
+        &b.extension().unwrap_or_default().to_string_lossy(),
+    )
+}
+
+fn ensure_image_decoders_registered() {
+    REGISTER_IMAGE_DECODERS.call_once(|| {
+        jxl_oxide::integration::register_image_decoding_hook();
+    });
+}
+
+/// Convenience wrapper around ImageReader::open().with_guessed_format().decode()
+pub fn open_image(path: &Path) -> ImageResult<DynamicImage> {
+    ensure_image_decoders_registered();
+    ImageReader::open(path)?.with_guessed_format()?.decode()
+}
+
+pub fn open_animation_frames(path: &Path) -> ImageResult<Option<image::Frames<'static>>> {
+    let format = ImageReader::open(path)?.with_guessed_format()?.format();
+    let file = || {
+        File::open(path)
+            .map(BufReader::new)
+            .map_err(image::ImageError::IoError)
+    };
+
+    match format {
+        Some(ImageFormat::Gif) => {
+            let decoder = image::codecs::gif::GifDecoder::new(file()?)?;
+            Ok(Some(decoder.into_frames()))
+        }
+        Some(ImageFormat::Png) => {
+            let decoder = image::codecs::png::PngDecoder::new(file()?)?;
+            if decoder.is_apng()? {
+                Ok(Some(decoder.apng()?.into_frames()))
+            } else {
+                Ok(None)
+            }
+        }
+        Some(ImageFormat::WebP) => {
+            let decoder = image::codecs::webp::WebPDecoder::new(file()?)?;
+            if decoder.has_animation() {
+                Ok(Some(decoder.into_frames()))
+            } else {
+                Ok(None)
+            }
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Resolve a CLI path to a directory and an optional target filename.
@@ -147,7 +302,8 @@ pub fn get_log_directory() -> PathBuf {
 
 pub fn setup_panic_hook(log_buffer: Arc<Mutex<VecDeque<String>>>) {
     let log_file_path = get_log_directory().join("panic.log");
-    std::fs::create_dir_all(log_file_path.parent().unwrap()).expect("Failed to create log directory");
+    std::fs::create_dir_all(log_file_path.parent().unwrap())
+        .expect("Failed to create log directory");
 
     std::panic::set_hook(Box::new(move |info| {
         let backtrace = std::backtrace::Backtrace::force_capture();
