@@ -8,9 +8,21 @@ use crate::cache;
 use crate::decode::image_to_color_image;
 use crate::file_io::{self, open_image};
 use crate::settings::{ImageDiscoveryOptions};
+use crate::view_animation::{Easing, ViewAnimation, ViewTransform};
 
 const MIN_ZOOM: f32 = 0.05;
 const MAX_ZOOM: f32 = 100.0;
+
+const IMAGE_DOUBLE_CLICK_MAX_DELAY: f64 = 0.30;
+const IMAGE_DOUBLE_CLICK_MAX_DISTANCE: f32 = 8.0;
+const DOUBLE_CLICK_ZOOM_ANIMATION_DURATION: f64 = 0.12;
+
+#[derive(Clone, Copy)]
+struct ImageClick {
+    time: f64,
+    pos: egui::Pos2,
+    image_index: usize,
+}
 
 pub(crate) struct Pane {
     /// Top level directory from which the pane loaded files
@@ -32,6 +44,8 @@ pub(crate) struct Pane {
     pub(crate) mouse_wheel_zoom: bool,
     pub(crate) reset_zoom_pan_on_navigation: bool,
     pub(crate) preview_budget_mb: usize,
+    last_image_click: Option<ImageClick>,
+    view_animation: Option<ViewAnimation>,
 }
 
 impl Pane {
@@ -63,6 +77,8 @@ impl Pane {
             mouse_wheel_zoom,
             reset_zoom_pan_on_navigation,
             preview_budget_mb,
+            last_image_click: None,
+            view_animation: None,
         }
     }
 
@@ -387,6 +403,65 @@ impl Pane {
         false
     }
 
+    fn image_double_clicked(&mut self, response: &egui::Response, now: f64) -> Option<egui::Pos2> {
+        if !response.clicked_by(egui::PointerButton::Primary) {
+            return None;
+        }
+
+        let pos = response.interact_pointer_pos()?;
+        let double_clicked = self.last_image_click.is_some_and(|last| {
+            last.image_index == self.current_index
+                && now - last.time <= IMAGE_DOUBLE_CLICK_MAX_DELAY
+                && last.pos.distance(pos) <= IMAGE_DOUBLE_CLICK_MAX_DISTANCE
+        });
+
+        if double_clicked {
+            self.last_image_click = None;
+            Some(pos)
+        } else {
+            self.last_image_click = Some(ImageClick {
+                time: now,
+                pos,
+                image_index: self.current_index,
+            });
+            None
+        }
+    }
+
+    fn zoom_target(
+        &self,
+        zoom_factor: f32,
+        anchor: egui::Pos2,
+        available: &egui::Rect,
+    ) -> (f32, egui::Vec2) {
+        let target_zoom = (self.zoom * zoom_factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        let old_center = available.center() + self.pan;
+        let cursor_rel = anchor - old_center;
+        let target_pan = self.pan + cursor_rel * (1.0 - target_zoom / self.zoom);
+        (target_zoom, target_pan)
+    }
+
+    /// Zooms around a given anchor point, keeping that point fixed under the cursor.
+    fn zoom_to(&mut self, zoom_factor: f32, anchor: egui::Pos2, available: &egui::Rect) {
+        (self.zoom, self.pan) = self.zoom_target(zoom_factor, anchor, available);
+    }
+
+    fn advance_view_animation(&mut self, now: f64, ctx: &egui::Context) {
+        let Some(animation) = self.view_animation else {
+            return;
+        };
+
+        let sample = animation.sample(now);
+        self.zoom = sample.transform.zoom;
+        self.pan = sample.transform.pan;
+
+        if sample.done {
+            self.view_animation = None;
+        } else {
+            ctx.request_repaint();
+        }
+    }
+
     pub(crate) fn poll_animation(&mut self) {
         let Some(animation) = &mut self.animation else {
             return;
@@ -412,8 +487,15 @@ impl Pane {
             .map(|path| AnimationPlayer::new(path, ctx));
     }
 
+    /// Draws the current image with zoom/pan applied and handles view input.
     /// Returns true if the user changed zoom or pan this frame.
+    ///
+    /// The frame runs in this order: (1) apply a running view animation,
+    /// (2) let direct input override it, (3) start a new animation on
+    /// double-click, (4) draw. Steps 1-3 only mutate `self.zoom`/`self.pan`;
+    /// step 4 reads them once.
     fn show_image(&mut self, ui: &mut egui::Ui, tex: &egui::TextureHandle) -> bool {
+        // 0. Setup: skip for an empty pane or texture and snapshot the transform
         let tex_size = tex.size_vec2();
         let available = ui.available_rect_before_wrap();
 
@@ -426,46 +508,62 @@ impl Pane {
 
         let old_zoom = self.zoom;
         let old_pan = self.pan;
+        let now = ui.input(|i| i.time); // frame clock for double-click timing and the animation
+
+        // 1. Animation in progress: move zoom/pan toward its target for this frame.
+        self.advance_view_animation(now, ui.ctx());
 
         let response = ui.allocate_rect(available, egui::Sense::click_and_drag());
         let scale = (available.width() / tex_size.x).min(available.height() / tex_size.y);
 
-        // Zoom: scroll wheel (when enabled) or Ctrl/Cmd+scroll, plus pinch-to-zoom
+        // 2. Direct input: applies immediately and cancels any running animation.
+        //    Zoom: scroll wheel (when enabled) or Ctrl/Cmd+scroll, plus pinch.
         if response.hovered() && (self.mouse_wheel_zoom || ui.input(|i| i.modifiers.command)) {
             self.zoom_image(ui, &response, &available);
         }
 
-        // Pan: drag
+        //    Pan: drag. Also clears a pending first click.
         if response.dragged() {
+            self.last_image_click = None;
+            self.view_animation = None;
             self.pan += response.drag_delta();
         }
 
-        // Double-click: toggle between fit-to-screen and 1:1.
-        if response.double_clicked() {
+        // 3. Double-click: toggle fit-to-screen / 1:1 by starting an animation (applied in step 1).
+        if let Some(click_pos) = self.image_double_clicked(&response, now) {
             let is_fit_to_screen = (self.zoom - 1.0).abs() < f32::EPSILON;
-            let actual_size_zoom = (1.0 / scale).clamp(MIN_ZOOM, MAX_ZOOM);
 
-            if is_fit_to_screen {
-                self.zoom = actual_size_zoom;
-                if self.zoom >= 1.0 {
-                    if let Some(hover_pos) = response.hover_pos() {
-                        self.pan = (hover_pos - available.center()) * (1.0 - self.zoom);
-                    }
+            let (target_zoom, target_pan) = if is_fit_to_screen {
+                let actual_size_zoom = 1.0 / scale;
+                if actual_size_zoom >= 1.0 {
+                    // Larger than the pane: 1:1 anchored at the click.
+                    self.zoom_target(actual_size_zoom / self.zoom, click_pos, &available)
                 } else {
-                    self.pan = egui::Vec2::ZERO;
+                    // Smaller than the pane: 1:1 centered.
+                    (actual_size_zoom, egui::Vec2::ZERO)
                 }
             } else {
-                self.reset_view();
-            }
+                // Back to fit-to-screen.
+                (1.0, egui::Vec2::ZERO)
+            };
+
+            self.view_animation = Some(ViewAnimation::new(
+                ViewTransform::new(self.zoom, self.pan),
+                ViewTransform::new(target_zoom, target_pan),
+                now,
+                DOUBLE_CLICK_ZOOM_ANIMATION_DURATION,
+                Easing::EaseOutCubic,
+            ));
+            ui.ctx().request_repaint();
         }
 
-        // Compute display rect with updated zoom/pan (zero-frame-delay)
+        // 4. Draw with this frame's final zoom/pan (zero-frame-delay).
         let base_size = tex_size * scale;
         let display_size = base_size * self.zoom;
         let center = available.center() + self.pan;
         let display_rect = egui::Rect::from_center_size(center, display_size);
 
-        // Clip to the pane rect so zoomed images don't bleed into adjacent panes
+        // Clip to the pane rect so a zoomed image stays inside its own pane.
         let painter = ui.painter_at(available);
         let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
         painter.image(tex.id(), display_rect, uv, egui::Color32::WHITE);
@@ -481,13 +579,9 @@ impl Pane {
         let zoom_factor = pinch * scroll_factor;
 
         if zoom_factor != 1.0 {
-            let old_zoom = self.zoom;
-            self.zoom = (self.zoom * zoom_factor).clamp(MIN_ZOOM, MAX_ZOOM);
-
             if let Some(hover_pos) = response.hover_pos() {
-                let old_center = available.center() + self.pan;
-                let cursor_rel = hover_pos - old_center;
-                self.pan += cursor_rel * (1.0 - self.zoom / old_zoom);
+                self.view_animation = None;
+                self.zoom_to(zoom_factor, hover_pos, available);
             }
         }
     }

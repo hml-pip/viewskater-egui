@@ -26,6 +26,7 @@ mod perf;
 mod platform;
 mod settings;
 mod theme;
+mod view_animation;
 
 #[derive(Parser)]
 #[command(name = "viewskater-egui", about = "Fast image viewer")]
